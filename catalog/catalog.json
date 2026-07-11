@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "silero-vad-v5",
+      "task": "vad",
+      "name": "Silero VAD v5",
+      "description": "Voice activity detection used by every realtime pipeline (dictation, live sessions, chat turn-taking). Language-agnostic, ~2 MB resident.",
+      "languages": [],
+      "sizeBytes": 643854,
+      "quantization": null,
+      "license": "MIT",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+      "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+      "archive": "none",
+      "recommended": true
+    },
+    {
+      "id": "zipformer-en-2023-06-26",
+      "task": "asr-streaming",
+      "name": "Zipformer streaming EN",
+      "description": "Streaming Zipformer transducer for English \u2014 the realtime engine behind dictation, live transcription, and voice chat. Includes fp32 and int8 weights (int8 preferred at load).",
+      "languages": [
+        "en"
+      ],
+      "sizeBytes": 310414022,
+      "quantization": "int8",
+      "license": "Apache-2.0",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
+      "sha256": "639e25b578e9e997131402199419c13a941f8e4e198e2da1ce57dbf5cf401282",
+      "archive": "tar.bz2",
+      "recommended": true
+    },
+    {
+      "id": "whisper-small-int8",
+      "task": "asr-batch",
+      "name": "Whisper small (multilingual)",
+      "description": "Offline Whisper small for file imports \u2014 good quality on English and French (99 languages total). Includes fp32 and int8 weights; inline punctuation built in.",
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "sizeBytes": 639387718,
+      "quantization": "int8",
+      "license": "MIT",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2",
+      "sha256": "486a46afbb7ba798507190ffe02fea2dd726049af212e774537efac6afb210a6",
+      "archive": "tar.bz2",
+      "recommended": true
+    },
+    {
+      "id": "kokoro-en-v0_19",
+      "task": "tts",
+      "name": "Kokoro EN v0.19",
+      "description": "Fast multi-voice English TTS (11 voices) \u2014 the default voice for chat replies and read-aloud.",
+      "languages": [
+        "en"
+      ],
+      "sizeBytes": 319625534,
+      "quantization": null,
+      "license": "Apache-2.0",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2",
+      "sha256": "912804855a04745fa77a30be545b3f9a5d15c4d66db00b88cbcd4921df605ac7",
+      "archive": "tar.bz2",
+      "recommended": true
+    },
+    {
+      "id": "piper-fr-siwis",
+      "task": "tts",
+      "name": "Piper FR (SIWIS, medium)",
+      "description": "French VITS/Piper voice (fr_FR-siwis, medium quality) \u2014 the local French stock voice.",
+      "languages": [
+        "fr"
+      ],
+      "sizeBytes": 67207459,
+      "quantization": null,
+      "license": "MIT (model) / CC BY 4.0 (SIWIS data)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fr_FR-siwis-medium.tar.bz2",
+      "sha256": "375909aa30842b3a4efa10b1beb1d761af792960ae6873b4d53889f96c66195b",
+      "archive": "tar.bz2",
+      "recommended": false
+    },
+    {
+      "id": "zipvoice-distill-int8",
+      "task": "clone-tts",
+      "name": "ZipVoice Distill int8 (zh/en)",
+      "description": "Zero-shot voice cloning from a short reference recording, fully on-device. English and Chinese only \u2014 French clones fall back to ElevenLabs. Ships with the Vocos 24 kHz vocoder.",
+      "languages": [
+        "en",
+        "zh"
+      ],
+      "sizeBytes": 163320194,
+      "quantization": "int8",
+      "license": "Apache-2.0",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
+      "sha256": "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803",
+      "archive": "tar.bz2",
+      "recommended": true,
+      "extraFiles": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+          "dest": "vocos_24khz.onnx",
+          "sha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0"
+        }
+      ]
+    },
+    {
+      "id": "campplus-en-voxceleb",
+      "task": "speaker-embedding",
+      "name": "CAM++ VoxCeleb (3D-Speaker)",
+      "description": "Speaker embedding extractor trained on VoxCeleb \u2014 powers speaker identification, verification, and diarization naming for enrolled People.",
+      "languages": [
+        "en"
+      ],
+      "sizeBytes": 29596978,
+      "quantization": null,
+      "license": "Apache-2.0",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+      "sha256": "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b",
+      "archive": "none",
+      "recommended": true
+    },
+    {
+      "id": "pyannote-segmentation-3-0",
+      "task": "diarization",
+      "name": "Pyannote segmentation 3.0",
+      "description": "Speaker segmentation for offline diarization (who spoke when) — pairs with the speaker embedding model for clustering. Language-agnostic. Includes fp32 and int8 weights (int8 preferred at load).",
+      "languages": [],
+      "sizeBytes": 6958444,
+      "quantization": "int8",
+      "license": "MIT",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+      "sha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+      "archive": "tar.bz2",
+      "recommended": true
+    },
+    {
+      "id": "ct-transformer-zh-en",
+      "task": "punctuation",
+      "name": "CT-Transformer punctuation (zh/en)",
+      "description": "Adds punctuation and casing to raw ASR output for dictation and live sessions. English and Chinese \u2014 no local French punctuation model exists yet (spec \u00a75 gap).",
+      "languages": [
+        "en",
+        "zh"
+      ],
+      "sizeBytes": 279028058,
+      "quantization": null,
+      "license": "MIT",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2",
+      "sha256": "50f73f8cccffc2303999fda28b785ffcffbd7ea442c47385c30b9d045ee6afc3",
+      "archive": "tar.bz2",
+      "recommended": true
+    },
+    {
+      "id": "kws-zipformer-gigaspeech",
+      "task": "kws",
+      "name": "Zipformer KWS (GigaSpeech, EN)",
+      "description": "Streaming keyword spotter (3.3M params) trained on GigaSpeech — powers the playground keyword-spotting bench. Keywords are supplied as BPE tokens; ships bundled defaults (HELLO WORLD, HEY SIRI, …).",
+      "languages": [
+        "en"
+      ],
+      "sizeBytes": 17626723,
+      "quantization": "int8",
+      "license": "Apache-2.0",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2",
+      "sha256": "f170013b4716e41b62b9bfd809687c207cef798ef9bc6534d524e17af9b6561a",
+      "archive": "tar.bz2",
+      "recommended": true
+    },
+    {
+      "id": "spleeter-2stems-fp16",
+      "task": "separation",
+      "name": "Spleeter 2-stems (fp16)",
+      "description": "Offline source separation splitting a clip into vocals + accompaniment (Deezer Spleeter, fp16) — the playground source-separation bench. Language-agnostic; file input only.",
+      "languages": [],
+      "sizeBytes": 35271738,
+      "quantization": null,
+      "license": "MIT",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/sherpa-onnx-spleeter-2stems-fp16.tar.bz2",
+      "sha256": "d54561979bd2e08a51e7dbd99ac36bb47564e089eefd403636dbca93e811bba2",
+      "archive": "tar.bz2",
+      "recommended": true
+    },
+    {
+      "id": "whisper-tiny-langid",
+      "task": "lang-id",
+      "name": "Whisper tiny (language ID)",
+      "description": "Multilingual Whisper tiny encoder/decoder for spoken-language identification (99 languages) — the playground language-ID bench. Returns a single top language.",
+      "languages": [],
+      "sizeBytes": 116204861,
+      "quantization": "int8",
+      "license": "MIT",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.tar.bz2",
+      "sha256": "c46116994e539aa165266d96b325252728429c12535eb9d8b6a2b10f129e66b1",
+      "archive": "tar.bz2",
+      "recommended": true
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+[package]
+name = "vocalis"
+version = "0.1.0"
+description = "Vocalis — local-first realtime speech toolkit"
+authors = ["Martin Dionne"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "vocalis_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+log = "0.4"
+dirs = "5.0"
+thiserror = "2"
+tauri = { version = "2", features = ["macos-private-api", "protocol-asset", "tray-icon"] }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
+tokio = { version = "1", features = ["full"] }
+keyring = { version = "3", features = ["apple-native"] }
+base64 = "0.22"
+sherpa-onnx = "1.13.4"
+cpal = "0.16"
+# Pure-Rust audio decoding for file import (spec §4, M3 item 4): wav/mp3/m4a-aac/flac.
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "alac", "isomp4", "flac", "wav", "pcm"] }
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
+tar = "0.4"
+bzip2 = "0.4"
+sha2 = "0.10"
+arboard = "3"
+core-foundation = "0.10"
+core-graphics = "0.25"
+tauri-plugin-http = "2.5.9"
+
+[dev-dependencies]
+tempfile = "3"
