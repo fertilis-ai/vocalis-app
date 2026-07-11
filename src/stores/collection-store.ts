@@ -20,7 +20,7 @@ import { serialize } from "@/lib/write-queue";
 // item content is owned by a feature store — this only tracks the tree.
 
 export interface CollectionStoreConfig {
-  /** Path to this collection's tree file, e.g. "chats/tree.json". */
+  /** Path to this collection's tree file, e.g. "~/.vocalis/chats/tree.json". */
   treePath: string;
   /**
    * Delete a leaf's backing files when it (or an enclosing folder) is removed.

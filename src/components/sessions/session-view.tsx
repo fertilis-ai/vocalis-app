@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -132,9 +133,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-3 border-border border-b px-4 py-3">
+      <header className="flex items-center justify-between gap-3 border-b border-border px-2 py-2">
         <div className="min-w-0">
-          <h1 className="truncate font-semibold text-base">{session.title}</h1>
+          <h1 className="truncate text-sm font-medium">{session.title}</h1>
           <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
             <StatusDot status={session.status} recording={recording} />
             <span className="capitalize">{statusLabel(session, recorder.status)}</span>
@@ -173,7 +174,13 @@ export function SessionView({ sessionId }: SessionViewProps) {
             transcript={transcript}
             speakers={speakers}
             people={people}
-            partial={recording ? recorder.partial : undefined}
+            statusLine={
+              recording
+                ? recorder.transcribingUtterance
+                  ? "Transcribing…"
+                  : "Listening…"
+                : undefined
+            }
             editable={!recording && !processing}
             onPlay={
               audioAvailable
@@ -257,16 +264,18 @@ function RetentionMenu({
         <MoreVertical className="h-4 w-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel>Audio</DropdownMenuLabel>
-        <DropdownMenuItem
-          onClick={(e) => {
-            e.preventDefault();
-            onToggleRetain(!audioRetained);
-          }}
-        >
-          <Checkbox checked={audioRetained} className="mr-2" />
-          Keep audio for playback
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Audio</DropdownMenuLabel>
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.preventDefault();
+              onToggleRetain(!audioRetained);
+            }}
+          >
+            <Checkbox checked={audioRetained} className="mr-2" />
+            Keep audio for playback
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
         {canDiscard && (
           <>
             <DropdownMenuSeparator />

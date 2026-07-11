@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
 
 use crate::audio::AudioCapture;
-use crate::engines::{SpeechDetector, StreamingAsrSession};
-use crate::pipeline::PipelineEvent;
+use crate::engines::{OfflineAsr, SpeechDetector};
+use crate::pipeline::{transcribe_utterance, PipelineEvent};
 
 /// The dictation thread owns capture and all engine sessions. Commands only
 /// send this small control message; raw audio never leaves the thread.
@@ -61,8 +61,12 @@ impl DictationRegistry {
             .collect()
     }
 
-    /// Request final text from the capture thread. The brief timeout prevents
-    /// a failed audio/engine thread from hanging a Tauri command indefinitely.
+    /// Request final text from the capture thread. Finalize now blocks on a
+    /// real batch decode (not just a stream flush) of whatever's buffered —
+    /// measured whisper-small-int8 RTF is ~0.12 at the pipeline's 2 threads,
+    /// so even the worst case (the full 90s dictation cap spoken as one
+    /// unbroken utterance) decodes in ~11s. 20s leaves headroom above that
+    /// while still catching a genuinely hung audio/engine thread.
     pub fn finalize(&self, id: u32) -> Result<String, String> {
         let control = self
             .entries
@@ -76,7 +80,7 @@ impl DictationRegistry {
             .send(DictationControl::Finalize(result_tx))
             .map_err(|_| "dictation pipeline stopped unexpectedly".to_string())?;
         result_rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(20))
             .map_err(|_| "dictation finalization timed out".to_string())?
     }
 
@@ -110,7 +114,8 @@ pub struct DictationPipelineModels {
     pub input_device: Option<String>,
 }
 
-/// Start a mic → VAD → streaming ASR dictation run. Audio is held only by the
+/// Start a mic → VAD → batch ASR dictation run: one decode per VAD-bounded
+/// utterance, on the falling edge (spec §0/§3.2). Audio is held only by the
 /// capture/engine thread and discarded as soon as it exits.
 pub fn start_dictation_pipeline(
     registry: &DictationRegistry,
@@ -153,7 +158,7 @@ fn run_dictation_pipeline(
         Ok(vad) => vad,
         Err(message) => return send(PipelineEvent::Error { message }),
     };
-    let mut asr = match StreamingAsrSession::new(&models.asr_dir, models.num_threads) {
+    let asr = match OfflineAsr::new(&models.asr_dir, models.num_threads, None) {
         Ok(asr) => asr,
         Err(message) => return send(PipelineEvent::Error { message }),
     };
@@ -169,6 +174,10 @@ fn run_dictation_pipeline(
     });
 
     let mut transcript = Vec::new();
+    // Utterance-local buffer, cleared after every decode (mirrors
+    // chat_capture.rs) — dictation never needs the whole session's audio.
+    let mut buffer: Vec<f32> = Vec::new();
+    let mut in_utterance = false;
     let started_at = Instant::now();
     loop {
         // A missed release must not leave microphone/ASR work running forever.
@@ -183,7 +192,14 @@ fn run_dictation_pipeline(
         }
         match control_rx.try_recv() {
             Ok(DictationControl::Finalize(result_tx)) => {
-                append_segment(&mut transcript, asr.finish().unwrap_or_default());
+                // Key-release before a natural VAD falling edge: treat
+                // whatever's buffered as a synthetic falling edge. A fresh
+                // never-cancel flag mirrors chat_capture.rs's ForceFinalize —
+                // this decode must run to completion.
+                if in_utterance {
+                    let no_cancel = AtomicBool::new(false);
+                    decode_and_append(&asr, &buffer, &no_cancel, &mut transcript, &send);
+                }
                 capture.stop();
                 let _ = result_tx.send(Ok(transcript.join(" ")));
                 send(PipelineEvent::Stopped);
@@ -203,22 +219,21 @@ fn run_dictation_pipeline(
 
         match audio_rx.recv_timeout(Duration::from_millis(30)) {
             Ok(samples) => {
+                if in_utterance {
+                    buffer.extend_from_slice(&samples);
+                }
                 if let Some(speaking) = vad.push(&samples) {
                     send(PipelineEvent::VadState { speaking });
-                }
-                let decode_started = Instant::now();
-                if let Some(text) = asr.push(&samples) {
-                    send(PipelineEvent::Partial {
-                        text,
-                        latency_ms: decode_started.elapsed().as_secs_f32() * 1000.0,
-                    });
-                }
-                if let Some(segment) = asr.take_final() {
-                    append_segment(&mut transcript, segment.text.clone());
-                    send(PipelineEvent::Final {
-                        text: segment.text,
-                        words: segment.words,
-                    });
+                    if speaking {
+                        in_utterance = true;
+                        buffer.clear();
+                        buffer.extend_from_slice(&samples);
+                    } else if in_utterance {
+                        in_utterance = false;
+                        let no_cancel = AtomicBool::new(false);
+                        decode_and_append(&asr, &buffer, &no_cancel, &mut transcript, &send);
+                        buffer.clear();
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -230,6 +245,35 @@ fn run_dictation_pipeline(
                 return;
             }
         }
+    }
+}
+
+/// Batch-decode one VAD-bounded utterance and, if it produced any text,
+/// append it to the running transcript and emit a `Final`. Sends
+/// `Processing` first so the frontend can show "Transcribing…" for the
+/// decode window.
+fn decode_and_append(
+    asr: &OfflineAsr,
+    buffer: &[f32],
+    stop: &AtomicBool,
+    transcript: &mut Vec<String>,
+    send: &dyn Fn(PipelineEvent),
+) {
+    send(PipelineEvent::Processing {
+        message: "transcribing".into(),
+    });
+    match transcribe_utterance(asr, buffer, stop) {
+        Ok(Some(transcription)) => {
+            append_segment(transcript, transcription.text.clone());
+            if !transcription.text.trim().is_empty() {
+                send(PipelineEvent::Final {
+                    text: transcription.text,
+                    words: transcription.words,
+                });
+            }
+        }
+        Ok(None) => {}
+        Err(message) => send(PipelineEvent::Error { message }),
     }
 }
 

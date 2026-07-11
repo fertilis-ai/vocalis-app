@@ -2,7 +2,8 @@ use std::path::Path;
 
 use serde::Serialize;
 use sherpa_onnx::{
-    OfflineRecognizer, OfflineRecognizerConfig, OfflineWhisperModelConfig,
+    OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig,
+    OfflineWhisperModelConfig,
 };
 
 use crate::registry::find_file;
@@ -56,23 +57,36 @@ pub struct OfflineAsr {
 impl OfflineAsr {
     /// `model_dir` must contain encoder/decoder .onnx + a tokens .txt
     /// (standard k2-fsa whisper release layout; int8 preferred by find_file's
-    /// sort). `language` is a whisper code ("en", "fr"); None = auto-detect.
+    /// sort) — or, for a NeMo transducer release (e.g. Parakeet TDT), an
+    /// additional joiner .onnx, which selects that model type instead.
+    /// `language` is a whisper code ("en", "fr") and is ignored for
+    /// transducer models (language comes from the BPE vocab); None = auto-detect.
     pub fn new(model_dir: &Path, num_threads: i32, language: Option<&str>) -> Result<Self, String> {
         let missing = |what: &str| format!("{what} not found in {}", model_dir.display());
         let encoder = find_file(model_dir, "encoder", ".onnx").ok_or_else(|| missing("encoder"))?;
         let decoder = find_file(model_dir, "decoder", ".onnx").ok_or_else(|| missing("decoder"))?;
         let tokens = find_file(model_dir, "tokens", ".txt").ok_or_else(|| missing("tokens"))?;
+        let joiner = find_file(model_dir, "joiner", ".onnx");
 
         let mut config = OfflineRecognizerConfig::default();
-        config.model_config.whisper = OfflineWhisperModelConfig {
-            encoder: Some(encoder.to_string_lossy().into_owned()),
-            decoder: Some(decoder.to_string_lossy().into_owned()),
-            language: language.map(str::to_owned),
-            task: Some("transcribe".into()),
-            tail_paddings: -1,
-            enable_token_timestamps: true,
-            enable_segment_timestamps: false,
-        };
+        if let Some(joiner) = joiner {
+            config.model_config.transducer = OfflineTransducerModelConfig {
+                encoder: Some(encoder.to_string_lossy().into_owned()),
+                decoder: Some(decoder.to_string_lossy().into_owned()),
+                joiner: Some(joiner.to_string_lossy().into_owned()),
+            };
+            config.model_config.model_type = Some("nemo_transducer".into());
+        } else {
+            config.model_config.whisper = OfflineWhisperModelConfig {
+                encoder: Some(encoder.to_string_lossy().into_owned()),
+                decoder: Some(decoder.to_string_lossy().into_owned()),
+                language: language.map(str::to_owned),
+                task: Some("transcribe".into()),
+                tail_paddings: -1,
+                enable_token_timestamps: true,
+                enable_segment_timestamps: false,
+            };
+        }
         config.model_config.tokens = Some(tokens.to_string_lossy().into_owned());
         config.model_config.num_threads = num_threads;
         config.model_config.provider = Some("cpu".into());

@@ -22,7 +22,10 @@ import { useSettingsStore } from "@/stores/settings-store";
 // Per-conversation model picker (spec M4 item 1). Static MODEL_OPTIONS shows
 // immediately; a live fetch (keyed to which providers have a key set)
 // refines the list once it lands. The local LLM entry always shows, since it
-// needs no key.
+// needs no key. Cloud entries stay visible but disabled with a reason
+// (privacy mode / no API key) rather than disappearing, mirroring the
+// EngineChip convention (spec M4 item 1: "reflect it in the model picker's
+// disabled reasons").
 
 const PROVIDER_LABELS: Record<CloudProvider, string> = {
   anthropic: "Anthropic",
@@ -37,24 +40,44 @@ interface ModelPickerProps {
   onChange: (ref: string) => void;
 }
 
+// Shared across every mounted picker (chat header + Voice Chat settings), so
+// one live fetch per key-set serves them all. An empty result isn't cached,
+// so a transient failure retries on the next mount.
+const liveModelsCache = new Map<string, Promise<ProviderModel[]>>();
+
+function fetchLiveModels(keySignature: string, apiKeys: Record<string, string>) {
+  let pending = liveModelsCache.get(keySignature);
+  if (!pending) {
+    pending = fetchAllProviderModels(apiKeys).then((results) => {
+      const models = results.flatMap((r) => r.models);
+      if (models.length === 0) liveModelsCache.delete(keySignature);
+      return models;
+    });
+    liveModelsCache.set(keySignature, pending);
+  }
+  return pending;
+}
+
 export function ModelPicker({ value, onChange }: ModelPickerProps) {
   const apiKeys = useSettingsStore((s) => s.apiKeys);
   const localLLM = useSettingsStore((s) => s.localLLM);
+  const privacyMode = useSettingsStore((s) => s.privacyMode);
   const [liveModels, setLiveModels] = useState<ProviderModel[] | null>(null);
   const keySignature = CLOUD_PROVIDERS.map((p) => (apiKeys[p] ? "1" : "0")).join("");
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on keySignature instead of the apiKeys object so a re-render with unchanged keys doesn't refetch
   useEffect(() => {
+    // Every cloud entry is disabled under privacy mode — don't spend network
+    // refining a list that can't be picked from anyway.
+    if (privacyMode) return;
     let cancelled = false;
-    fetchAllProviderModels(apiKeys).then((results) => {
-      if (cancelled) return;
-      const models = results.flatMap((r) => r.models);
-      if (models.length > 0) setLiveModels(models);
+    void fetchLiveModels(keySignature, apiKeys).then((models) => {
+      if (!cancelled && models.length > 0) setLiveModels(models);
     });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keySignature]);
+  }, [keySignature, privacyMode]);
 
   const modelsByProvider = useMemo(() => {
     const source = liveModels ?? MODEL_OPTIONS;
@@ -96,12 +119,24 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
         {CLOUD_PROVIDERS.map((provider) => {
           const models = modelsByProvider.get(provider) ?? [];
           if (models.length === 0) return null;
+          const disabledReason = privacyMode
+            ? "privacy mode"
+            : !apiKeys[provider]
+              ? "no API key"
+              : null;
           return (
             <DropdownMenuGroup key={provider}>
               <DropdownMenuLabel>{PROVIDER_LABELS[provider]}</DropdownMenuLabel>
               {models.map((m) => (
-                <DropdownMenuItem key={`${provider}/${m.id}`} onClick={() => onChange(`${provider}/${m.id}`)}>
-                  {m.name}
+                <DropdownMenuItem
+                  key={`${provider}/${m.id}`}
+                  disabled={!!disabledReason}
+                  onClick={() => onChange(`${provider}/${m.id}`)}
+                >
+                  <span className="flex-1 truncate">{m.name}</span>
+                  {disabledReason && (
+                    <span className="text-muted-foreground text-xs">{disabledReason}</span>
+                  )}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuGroup>

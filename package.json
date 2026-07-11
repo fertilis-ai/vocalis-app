@@ -14,7 +14,7 @@
     "lint:fix": "biome check --write .",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build && zsh scripts/fix-dmg-volume-icon.zsh"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",

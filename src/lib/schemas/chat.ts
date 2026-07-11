@@ -26,8 +26,12 @@ export const conversationSchema = z.object({
   voiceId: z.string().optional(),
   /** "provider/model", e.g. "anthropic/claude-sonnet-4-5". Unset = no model chosen yet. */
   modelRef: z.string().optional(),
-  /** Whether new assistant replies auto-play as speech. */
+  /** Whether new assistant replies auto-play as speech. Doubles as voice
+   * mode's transcript-only toggle — off mutes synthesis without stopping
+   * capture. */
   ttsEnabled: z.boolean(),
+  /** Voice-mode turn-taking; unset = hands-free VAD endpointing. */
+  voiceInputMode: z.enum(["vad", "ptt"]).optional(),
   messages: z.array(chatMessageSchema),
 });
 

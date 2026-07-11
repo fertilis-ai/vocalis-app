@@ -6,6 +6,7 @@ import {
   Mic,
   Palette,
   HardDrive,
+  Waves,
   Waypoints,
   Wrench,
 } from "lucide-react";
@@ -18,6 +19,7 @@ export const SETTINGS_SECTIONS = [
   { id: "routing", label: "Engines & Routing", icon: Waypoints },
   { id: "models", label: "Models & Storage", icon: HardDrive },
   { id: "chat", label: "Chat", icon: MessageSquare },
+  { id: "voice-chat", label: "Voice Chat", icon: Waves },
   { id: "dictation", label: "Dictation", icon: Keyboard },
   { id: "audio", label: "Audio", icon: Mic },
   { id: "advanced", label: "Advanced", icon: Wrench },

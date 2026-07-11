@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
@@ -48,12 +49,14 @@ export function ExportMenu({ session, transcript, nameFor }: ExportMenuProps) {
         Export
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuLabel>Export transcript</DropdownMenuLabel>
-        {FORMATS.map(({ format, label }) => (
-          <DropdownMenuItem key={format} onClick={() => void run(format)}>
-            {label}
-          </DropdownMenuItem>
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Export transcript</DropdownMenuLabel>
+          {FORMATS.map(({ format, label }) => (
+            <DropdownMenuItem key={format} onClick={() => void run(format)}>
+              {label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

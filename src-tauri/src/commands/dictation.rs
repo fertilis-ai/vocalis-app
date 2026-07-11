@@ -105,10 +105,10 @@ fn resolve_dictation_models(
     input_device: Option<String>,
 ) -> Result<DictationPipelineModels, String> {
     let asr_dir = match asr_model {
-        Some(id) => registry::resolve("asr-streaming", &id)?,
-        None => registry::first_installed("asr-streaming")?,
+        Some(id) => registry::resolve("asr-batch", &id)?,
+        None => registry::first_installed("asr-batch")?,
     }
-    .ok_or("no streaming ASR model installed — download one in Models")?;
+    .ok_or("no batch ASR model installed — download one in Models")?;
     let vad_dir = match vad_model {
         Some(id) => registry::resolve("vad", &id)?,
         None => registry::first_installed("vad")?,

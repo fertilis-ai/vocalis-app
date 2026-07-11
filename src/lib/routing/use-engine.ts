@@ -34,6 +34,7 @@ export function useRouterContext(): RouterContext {
         Object.keys(apiKeys).filter((provider) => apiKeys[provider]),
       ),
       installedTasks: new Set(installed.map((model) => model.task)),
+      installedModels: installed,
     }),
     [privacyMode, routing, apiKeys, installed],
   );

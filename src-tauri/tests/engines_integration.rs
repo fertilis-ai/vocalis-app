@@ -57,6 +57,7 @@ fn streaming_asr_transcribes_test_wav() {
 #[test]
 #[ignore]
 fn offline_whisper_transcribes_test_wav() {
+    use std::time::Instant;
     use vocalis_lib::engines::OfflineAsr;
 
     let batch_dir = registry::first_installed("asr-batch")
@@ -68,8 +69,18 @@ fn offline_whisper_transcribes_test_wav() {
     let (samples, rate) = wav_samples(&asr_dir.join("test_wavs/0.wav"));
     assert_eq!(rate, 16_000);
 
-    let asr = OfflineAsr::new(&batch_dir, 4, Some("en")).unwrap();
+    // 2 threads matches the interactive pipelines' ASR_THREADS (chat_capture,
+    // dictation, session_pipeline_start) — this measures the same
+    // per-utterance batch-decode latency they see in production.
+    let asr = OfflineAsr::new(&batch_dir, 2, Some("en")).unwrap();
+    let started = Instant::now();
     let result = asr.transcribe(&samples).unwrap();
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let audio_secs = samples.len() as f64 / rate as f64;
+    println!(
+        "whisper batch decode: {audio_secs:.1}s audio in {elapsed_ms:.0}ms (rtf {:.2}, 2 threads)",
+        elapsed_ms / 1000.0 / audio_secs.max(0.001)
+    );
     let text = result.text.to_lowercase();
     println!("whisper transcript: {text}");
     assert!(

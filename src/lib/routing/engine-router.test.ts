@@ -18,6 +18,7 @@ function ctx(overrides: Partial<RouterContext> = {}): RouterContext {
     routing: { ...DEFAULT_ROUTING },
     apiProviders: new Set(),
     installedTasks: new Set(),
+    installedModels: [],
     ...overrides,
   };
 }
@@ -188,5 +189,31 @@ describe("resolveEngine", () => {
     );
     // Hand-edited config pointing nowhere degrades to the local fallback.
     expect(resolution.active?.id).toBe("local.kokoro-en");
+  });
+
+  it("lists every installed model for a local engine's modelTask, not just one", () => {
+    // Two downloaded asr-batch models (spec bug: only one hardcoded row showed).
+    const installedModels = [
+      { task: "asr-batch", id: "whisper-small-int8", sizeBytes: 1 },
+      { task: "asr-batch", id: "parakeet-tdt-0.6b-v3-int8", sizeBytes: 1 },
+    ];
+    const options = taskOptions(
+      "batchAsr",
+      ctx({
+        installedTasks: new Set(["asr-batch"]),
+        installedModels,
+      }),
+    );
+    const local = options.find((o) => o.engine.kind === "local");
+    expect(local?.models.map((m) => m.id)).toEqual([
+      "whisper-small-int8",
+      "parakeet-tdt-0.6b-v3-int8",
+    ]);
+  });
+
+  it("gives a local engine no models when its modelTask has none installed", () => {
+    const options = taskOptions("streamingAsr", ctx());
+    const local = options.find((o) => o.engine.kind === "local");
+    expect(local?.models).toEqual([]);
   });
 });

@@ -34,6 +34,14 @@ export const DEFAULT_DICTATION = {
 
 export const DEFAULT_TTS_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 
+/** Voice Chat settings (M4 item 4): VAD silence threshold, barge-in, defaults */
+export const DEFAULT_VOICE_CHAT = {
+  vadSilenceMs: 800,
+  bargeInEnabled: true,
+  defaultVoiceId: "",
+  defaultModelRef: "",
+} as const;
+
 /** "" = system default input device */
 export const DEFAULT_AUDIO = { inputDevice: "" } as const;
 
@@ -118,6 +126,27 @@ const localLlmSchema = z
   .default(DEFAULT_LOCAL_LLM)
   .catch(DEFAULT_LOCAL_LLM);
 
+const voiceChatSchema = z
+  .object({
+    vadSilenceMs: z
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULT_VOICE_CHAT.vadSilenceMs)
+      .catch(DEFAULT_VOICE_CHAT.vadSilenceMs),
+    bargeInEnabled: z
+      .boolean()
+      .default(DEFAULT_VOICE_CHAT.bargeInEnabled)
+      .catch(DEFAULT_VOICE_CHAT.bargeInEnabled),
+    defaultVoiceId: z.string().default(DEFAULT_VOICE_CHAT.defaultVoiceId).catch(DEFAULT_VOICE_CHAT.defaultVoiceId),
+    defaultModelRef: z
+      .string()
+      .default(DEFAULT_VOICE_CHAT.defaultModelRef)
+      .catch(DEFAULT_VOICE_CHAT.defaultModelRef),
+  })
+  .default(DEFAULT_VOICE_CHAT)
+  .catch(DEFAULT_VOICE_CHAT);
+
 export const configSchema = z.object({
   appearance: appearanceSchema,
   privacyMode: z.boolean().default(false).catch(false),
@@ -127,6 +156,7 @@ export const configSchema = z.object({
   audio: audioSchema,
   cache: cacheSchema,
   localLlm: localLlmSchema,
+  voiceChat: voiceChatSchema,
 });
 
 export type ConfigYaml = z.infer<typeof configSchema>;

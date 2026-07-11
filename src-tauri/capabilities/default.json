@@ -13,7 +13,9 @@
         { "url": "https://api.openai.com/*" },
         { "url": "https://api.groq.com/*" },
         { "url": "https://api.elevenlabs.io/*" },
-        { "url": "https://api.deepgram.com/*" }
+        { "url": "https://api.deepgram.com/*" },
+        { "url": "http://localhost:*/*" },
+        { "url": "http://127.0.0.1:*/*" }
       ]
     }
   ]

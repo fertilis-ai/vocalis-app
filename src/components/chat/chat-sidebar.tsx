@@ -21,6 +21,7 @@ import type { CollectionTreeNode } from "@/lib/schemas/collection";
 import { useChatStore } from "@/stores/chat-store";
 import { useChatsCollection } from "@/stores/chats-collection";
 import { useSessionStore } from "@/stores/session-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 // Sidebar for the chat section: one tree mixing transcription sessions and
 // (M4) voice chats. New-flow distinguishes the two kinds with distinct icons.
@@ -86,7 +87,13 @@ export function ChatSidebar() {
   async function createChatLeaf() {
     const title = getUniqueName("New chat", leafNames);
     const node = await store.createLeaf("chat", title);
-    await useChatStore.getState().createConversation({ id: node.id, title });
+    const { defaultVoiceId, defaultModelRef } = useSettingsStore.getState().voiceChat;
+    await useChatStore.getState().createConversation({
+      id: node.id,
+      title,
+      voiceId: defaultVoiceId || undefined,
+      modelRef: defaultModelRef || undefined,
+    });
     store.select(node.id);
   }
 

@@ -14,7 +14,7 @@ import {
 } from "@/lib/engines/local";
 import { useSettingsStore } from "@/stores/settings-store";
 
-type HudStatus = "idle" | "listening" | "finalizing" | "complete" | "error";
+type HudStatus = "idle" | "listening" | "transcribing" | "finalizing" | "complete" | "error";
 type HotkeyEvent = { state: "pressed" | "released" | "cancel"; mode: "hold" | "toggle" };
 
 export function DictationHud() {
@@ -33,7 +33,7 @@ export function DictationHud() {
   const privacyMode = useSettingsStore((state) => state.privacyMode);
   const apiKeys = useSettingsStore((state) => state.apiKeys);
   const historyEnabled = useSettingsStore((state) => state.dictation.historyEnabled);
-  const asrModel = useSettingsStore((state) => state.activeByTask["asr-streaming"]);
+  const asrModel = useSettingsStore((state) => state.activeByTask["asr-batch"]);
 
   const hide = useCallback(() => {
     void getCurrentWindow().hide();
@@ -84,9 +84,15 @@ export function DictationHud() {
 
   const onPipelineEvent = useCallback((event: PipelineEvent) => {
     switch (event.type) {
-      case "partial":
+      case "processing":
+        // A batch decode just started for the utterance that ended. Guarded
+        // so it can't clobber "finalizing" (Finish already in flight) with a
+        // stray transcribing flicker from the same falling edge.
+        setStatus((current) => (current === "listening" ? "transcribing" : current));
+        break;
       case "final":
         setPartial(event.text);
+        setStatus((current) => (current === "transcribing" ? "listening" : current));
         break;
       case "vadState":
         setSpeaking(event.speaking);
@@ -168,7 +174,9 @@ export function DictationHud() {
     };
   }, []);
 
-  const listening = status === "listening";
+  // Pipeline is still capturing (mic active, Finish available) through a
+  // brief mid-dictation "transcribing" decode, not just while "listening".
+  const listening = status === "listening" || status === "transcribing";
   const complete = status === "complete";
 
   return (
@@ -181,9 +189,19 @@ export function DictationHud() {
 
         <div className="relative min-w-0 flex-1">
           <div className="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            <span>{complete ? "sent" : status === "finalizing" ? "finishing" : listening ? "dictating" : "ready"}</span>
+            <span>
+              {complete
+                ? "sent"
+                : status === "finalizing"
+                  ? "finishing"
+                  : status === "transcribing"
+                    ? "transcribing"
+                    : listening
+                      ? "dictating"
+                      : "ready"}
+            </span>
             <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />
-            <span>local · {asrModel ?? "zipformer"}</span>
+            <span>local · {asrModel ?? "whisper"}</span>
             <span className="ml-1 flex h-3 items-center gap-0.5" title={speaking ? "Speech detected" : "Listening"}>
               {[0, 1, 2, 3].map((bar) => (
                 <i

@@ -8,8 +8,9 @@ use crate::audio::TARGET_SAMPLE_RATE;
 use crate::commands::speech::read_wav_16k;
 use crate::engines::{DiarizationParams, Diarizer, OfflineAsr, Punctuator, SpeakerEmbedder};
 use crate::pipeline::{
-    cluster_means_to_people, letter_label, relabel_by_first_appearance, DropGuard,
-    EnrolledSpeaker, PipelineEvent, PipelineRegistry, SessionSegment,
+    cluster_means_to_people, letter_label, relabel_by_first_appearance, transcribe_chunks,
+    DropGuard, EnrolledSpeaker, PipelineEvent, PipelineRegistry, SessionSegment,
+    MAX_ASR_CHUNK_SAMPLES,
 };
 
 // The file-import pipeline (spec §2.2B, M3 item 4). Unlike the live session
@@ -19,11 +20,9 @@ use crate::pipeline::{
 // diarization span, punctuate, embed, and match enrolled people. It streams the
 // same events the live pipeline does — `SpeakerTurn` per turn, `Progress` for
 // the meter, then a settled `Refined` + `Stopped` — so the session UI (item 5)
-// renders live and imported transcripts through one handler.
-
-/// Whisper's context window is 30 s; keep ASR chunks safely under it so a long
-/// single-speaker span is transcribed in pieces rather than truncated.
-const MAX_ASR_CHUNK_SAMPLES: usize = 28 * TARGET_SAMPLE_RATE as usize;
+// renders live and imported transcripts through one handler. Chunked decode +
+// word-timestamp stitching is shared with the other batch-ASR pipelines via
+// `pipeline::vad_batch`.
 
 pub struct ImportModels {
     /// Batch (offline whisper) ASR model dir.
@@ -151,8 +150,10 @@ fn run_import(models: ImportModels, channel: Channel<PipelineEvent>, stop: Arc<A
         let start_sample = ((span.start as f64) * TARGET_SAMPLE_RATE as f64) as usize;
         let end_sample = (((span.end as f64) * TARGET_SAMPLE_RATE as f64) as usize).min(samples.len());
 
-        let text = match transcribe_span(&asr, &samples, start_sample, end_sample, &stop) {
-            Ok(Some(t)) => t,
+        let text = match transcribe_chunks(&samples[start_sample..end_sample], MAX_ASR_CHUNK_SAMPLES, &stop, |chunk| {
+            asr.transcribe(chunk)
+        }) {
+            Ok(Some(t)) => t.text,
             Ok(None) => return send(PipelineEvent::Cancelled),
             Err(message) => return send(PipelineEvent::Error { message }),
         };
@@ -206,29 +207,6 @@ fn run_import(models: ImportModels, channel: Channel<PipelineEvent>, stop: Arc<A
     send(PipelineEvent::Stopped);
 }
 
-/// Batch-transcribe one span, splitting spans longer than whisper's window into
-/// chunks whose texts are concatenated. Checks `stop` between chunks so a
-/// cancel doesn't have to wait out a long multi-chunk span (`Ok(None)`).
-fn transcribe_span(
-    asr: &OfflineAsr,
-    samples: &[f32],
-    start: usize,
-    end: usize,
-    stop: &AtomicBool,
-) -> Result<Option<String>, String> {
-    let mut parts: Vec<String> = Vec::new();
-    for (chunk_start, chunk_end) in chunk_span(start, end, MAX_ASR_CHUNK_SAMPLES) {
-        if stop.load(Ordering::Relaxed) {
-            return Ok(None);
-        }
-        let text = asr.transcribe(&samples[chunk_start..chunk_end])?.text;
-        if !text.trim().is_empty() {
-            parts.push(text.trim().to_string());
-        }
-    }
-    Ok(Some(parts.join(" ")))
-}
-
 /// Settle the imported segments: renumber clusters by first appearance (so the
 /// first speaker is "A") and re-match each cluster to an enrolled person from
 /// its segments' mean embedding.
@@ -257,22 +235,6 @@ fn settle(
 
 // ── Pure algorithmic core (unit-tested) ─────────────────────────────────────
 
-/// Split [start, end) into contiguous chunks of at most `max_len` samples.
-/// Returns a single chunk when the span already fits (the common case).
-fn chunk_span(start: usize, end: usize, max_len: usize) -> Vec<(usize, usize)> {
-    if end <= start {
-        return Vec::new();
-    }
-    let mut chunks = Vec::new();
-    let mut cursor = start;
-    while cursor < end {
-        let next = (cursor + max_len).min(end);
-        chunks.push((cursor, next));
-        cursor = next;
-    }
-    chunks
-}
-
 /// Whether text already carries sentence punctuation, so the punctuator can be
 /// skipped. Covers both ASCII and CJK/French terminal marks.
 fn has_sentence_punctuation(text: &str) -> bool {
@@ -291,23 +253,6 @@ fn progress_fraction(done: f64, total: f64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn chunk_span_returns_single_chunk_when_it_fits() {
-        assert_eq!(chunk_span(0, 100, 448_000), vec![(0, 100)]);
-        assert_eq!(chunk_span(50, 200, 448_000), vec![(50, 200)]);
-    }
-
-    #[test]
-    fn chunk_span_splits_long_spans() {
-        assert_eq!(chunk_span(0, 250, 100), vec![(0, 100), (100, 200), (200, 250)]);
-    }
-
-    #[test]
-    fn chunk_span_empty_for_degenerate_range() {
-        assert!(chunk_span(100, 100, 100).is_empty());
-        assert!(chunk_span(200, 100, 100).is_empty());
-    }
 
     #[test]
     fn punctuation_detection() {

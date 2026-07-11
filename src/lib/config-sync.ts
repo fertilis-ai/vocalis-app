@@ -6,9 +6,10 @@
  * picked up by a 2 s poll. In browser mode this module is a no-op.
  *
  * Synced fields: hue, privacyMode, routing, dictation, models.activeByTask,
- * audio, cache.ttsMaxBytes, localLlm. Fields the store doesn't own (appearance.theme —
- * next-themes owns it via localStorage) are preserved from the last-loaded
- * file content so writes never clobber hand edits to them.
+ * audio, cache.ttsMaxBytes, localLlm, voiceChat. Fields the store doesn't own
+ * (appearance.theme — next-themes owns it via localStorage) are preserved
+ * from the last-loaded file content so writes never clobber hand edits to
+ * them.
  */
 
 import YAML from "yaml";
@@ -37,6 +38,7 @@ function extractConfigFromStore(): ConfigYaml {
     audio: { ...lastLoadedConfig.audio, inputDevice: s.audioInputDevice },
     cache: { ...lastLoadedConfig.cache, ttsMaxBytes: s.ttsCacheMaxBytes },
     localLlm: { ...s.localLLM },
+    voiceChat: { ...s.voiceChat },
   };
 }
 
@@ -103,6 +105,7 @@ async function loadConfigFromFile(providedContent?: string): Promise<void> {
       store.setAudioInputDevice(config.audio.inputDevice);
       store.setTtsCacheMaxBytes(config.cache.ttsMaxBytes);
       store.setLocalLLM(config.localLlm);
+      store.setVoiceChat(config.voiceChat);
 
       lastKnownContent = content;
       lastLoadedConfig = config;

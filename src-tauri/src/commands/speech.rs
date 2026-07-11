@@ -55,7 +55,7 @@ pub(crate) fn resolve_model_dir(
     .ok_or_else(|| format!("no {hint} model installed — download one in Models"))
 }
 
-fn resolve_vad_path(vad_model: Option<String>) -> Result<PathBuf, String> {
+pub(crate) fn resolve_vad_path(vad_model: Option<String>) -> Result<PathBuf, String> {
     let vad_dir = match vad_model {
         Some(id) => registry::resolve("vad", &id)?,
         None => registry::first_installed("vad")?,
@@ -65,7 +65,7 @@ fn resolve_vad_path(vad_model: Option<String>) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("no silero .onnx in {}", vad_dir.display()))
 }
 
-fn vad_params(
+pub(crate) fn vad_params(
     threshold: Option<f32>,
     min_silence: Option<f32>,
     min_speech: Option<f32>,
@@ -155,8 +155,8 @@ const SESSION_CLUSTER_THRESHOLD: f32 = 0.5;
 /// Enrolled-Person match threshold (spec §3.5 default).
 const SESSION_MATCH_THRESHOLD: f32 = 0.55;
 
-/// Start a live transcription session: mic → VAD → streaming ASR → punctuation
-/// → online provisional speaker labeling, retaining the audio for a stop-time
+/// Start a live transcription session: mic → VAD → batch ASR per utterance →
+/// punctuation → online provisional speaker labeling, retaining the audio for a stop-time
 /// diarization refinement pass. Returns the pipeline id immediately; turns and
 /// the settled transcript arrive as events. Only one session runs at a time.
 #[tauri::command]
@@ -174,6 +174,9 @@ pub fn session_pipeline_start(
     input_device: Option<String>,
     // Enrolled people to match live turns + refined clusters against (M3 item 3).
     enrolled: Vec<crate::commands::people::EnrolledPersonRef>,
+    // Prior transcript segments, when resuming a non-draft session (empty for a
+    // fresh session) — seeds speaker-cluster + audio continuity across a pause.
+    resume_segments: Vec<crate::pipeline::ResumeSegment>,
 ) -> Result<u32, String> {
     registry::download::validate_path_component(&session_id)?;
     if state.session_active.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -185,7 +188,7 @@ pub fn session_pipeline_start(
         let speaker_dir = resolve_model_dir("speaker-embedding", speaker_model, "speaker embedding")?;
         let enrolled = crate::commands::people::load_enrolled(enrolled);
         Ok(SessionPipelineModels {
-            asr_dir: resolve_model_dir("asr-streaming", asr_model, "streaming ASR")?,
+            asr_dir: resolve_model_dir("asr-batch", asr_model, "batch ASR")?,
             vad_path: resolve_vad_path(vad_model)?,
             punctuation_dir: resolve_model_dir("punctuation", punctuation_model, "punctuation")?,
             diar_segmentation_dir: resolve_model_dir("diarization", diarization_model, "diarization")?,
@@ -198,6 +201,7 @@ pub fn session_pipeline_start(
             enrolled,
             cluster_threshold: SESSION_CLUSTER_THRESHOLD,
             match_threshold: SESSION_MATCH_THRESHOLD,
+            resume_segments,
         })
     })();
     let models = match resolved {

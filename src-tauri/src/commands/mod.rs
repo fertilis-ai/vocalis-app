@@ -1,4 +1,5 @@
 mod app;
+mod chat_capture;
 mod config;
 mod dictation;
 mod fs;
@@ -10,6 +11,7 @@ mod people;
 pub(crate) mod speech;
 
 pub use app::*;
+pub use chat_capture::*;
 pub use config::*;
 pub use dictation::*;
 pub use fs::*;

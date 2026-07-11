@@ -13,7 +13,9 @@ import { useSettingsStore } from "@/stores/settings-store";
 // disk would hammer the write queue — the store only sees one write per turn.
 
 export interface UseChatStreamResult {
-  send: (text: string) => Promise<void>;
+  /** `onDelta` additionally receives each raw token as it streams — voice
+   * mode feeds it into a sentence chunker; text chat leaves it unset. */
+  send: (text: string, onDelta?: (delta: string) => void) => Promise<void>;
   stop: () => void;
   isStreaming: boolean;
   pendingReply: string;
@@ -28,7 +30,7 @@ export function useChatStream(conversationId: string): UseChatStreamResult {
   const streamingRef = useRef(false);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, onDelta?: (delta: string) => void) => {
       const trimmed = text.trim();
       if (!trimmed || streamingRef.current) return;
       setError(null);
@@ -81,6 +83,7 @@ export function useChatStream(conversationId: string): UseChatStreamResult {
         })) {
           accumulated += delta;
           setPendingReply(accumulated);
+          onDelta?.(delta);
         }
       } catch (err) {
         if (!controller.signal.aborted) {

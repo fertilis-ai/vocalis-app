@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use crate::engines::{
     Diarizer, LangIdentifier, OfflineAsr, Punctuator, SourceSeparator, SpeakerEmbedder, TtsEngine,
 };
-use crate::pipeline::{DictationRegistry, PipelineRegistry, RecorderRegistry};
+use crate::pipeline::{ChatCaptureRegistry, DictationRegistry, PipelineRegistry, RecorderRegistry};
 
 /// Cached batch-ASR engine plus the (model dir, language) it was loaded with —
 /// whisper bakes the language into the recognizer, so changing either reloads.
@@ -69,6 +69,7 @@ pub struct SpeechState {
     pub separator: Mutex<Option<SeparatorSlot>>,
     pub pipelines: PipelineRegistry,
     pub dictations: DictationRegistry,
+    pub chat_captures: ChatCaptureRegistry,
     pub recorders: Arc<RecorderRegistry>,
     /// True while a live transcription session runs — guards against a second
     /// concurrent session (spec §2.2B). Cleared when the session thread exits.
@@ -106,6 +107,7 @@ impl SpeechState {
         }
         held.extend(self.pipelines.paths_in_use());
         held.extend(self.dictations.paths_in_use());
+        held.extend(self.chat_captures.paths_in_use());
         any_path_within(&held, model_dir)
     }
 }

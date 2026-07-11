@@ -9,7 +9,7 @@ import { useSessionStore } from "./session-store";
 export type ChatLeafKind = "session" | "chat";
 
 export const useChatsCollection = createCollectionStore({
-  treePath: "chats/tree.json",
+  treePath: "~/.vocalis/chats/tree.json",
   guardDeleteLeaf: (id, kind) => {
     if (kind !== "session") return null;
     const status = useSessionStore.getState().sessions[id]?.status;

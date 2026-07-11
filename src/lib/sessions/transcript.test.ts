@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Person } from "@/lib/schemas/people";
 import type { SpeakerRef, TranscriptSegment } from "@/lib/schemas/session";
 import {
+  appendTurns,
   mergeSpeakers,
   speakerDisplay,
   speakersOf,
@@ -26,6 +27,32 @@ describe("toTranscript", () => {
     expect(out[0].id).toMatch(/[0-9a-f-]{36}/);
     expect(out[0].provisional).toBe(true);
     expect(out[0].personId).toBe("p1");
+  });
+});
+
+describe("appendTurns", () => {
+  it("with no prior segments behaves like toTranscript", () => {
+    const turns = [{ speakerLabel: "A", text: "hi", startMs: 0, endMs: 100 }];
+    const out = appendTurns([], turns, true);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      speakerLabel: "A",
+      text: "hi",
+      startMs: 0,
+      endMs: 100,
+      provisional: true,
+    });
+  });
+
+  it("prepends prior settled segments unchanged and appends fresh ones", () => {
+    const prior = [seg("A")];
+    const turns = [{ speakerLabel: "B", text: "yo", startMs: 200, endMs: 300 }];
+    const out = appendTurns(prior, turns, false);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toBe(prior[0]);
+    expect(out[1].speakerLabel).toBe("B");
+    expect(out[1].provisional).toBe(false);
+    expect(out[1].id).not.toBe(prior[0].id);
   });
 });
 

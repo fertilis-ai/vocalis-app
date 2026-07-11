@@ -1,170 +1,91 @@
-# M3 Implementation Review — Findings & Recommendations
+# M4 Implementation Review — Findings & Recommendations
 
-_Review date: 2026-07-10 (supersedes the M2.7+ review of the same date; its findings are dispositioned in §2). Scope: all five M3 items (schemas/collection kit, live session pipeline, People enrollment, file import, session UI + exports) verified line-by-line against `spec.md` and the `M3.md` build records, plus cross-cutting IPC/privacy/storage audits and a full deferred-item inventory. Method: five parallel line-level review passes (Rust live pipeline; Rust import + enrollment; webview foundations; session/voices UI + exports; prior-findings & cross-cutting audit), high-severity findings independently re-verified._
+_Review date: 2026-07-10 (supersedes the M3 review of the same date; that review's content is not restated here — see git history if needed). Scope: M4 items 1–2 (pi-ai LLM layer; chat persistence, text chat, read-aloud), verified against `spec.md` and `M4.md`'s own build records, plus an explicit inventory of the deferred items (M4 items 3–4) and the settings-section gap they imply. Method: read every file the build record names, traced the privacy-mode and disabled-reason claims against the actual code, confirmed by file search that nothing from items 3–4 exists yet._
 
-**Suite status at review time:** `tsc` clean · 291 vitest pass (27 files) · `cargo check` clean · all Rust tests pass incl. 11 real-model fixture tests · lint exit 0 (8 pre-existing warnings).
+**Suite status at review time:** `tsc` clean · 319 vitest pass (30 files) · `cargo check` clean · `lint` exit 0 new warnings (2 pre-existing `index.css` warnings, unrelated — see §5).
 
 ---
 
 ## 1. Verdict
 
-**The M3.md build records are honest.** Every claimed slice exists and matches its description; all recorded deferrals (WAV-not-FLAC, diarize-first tradeoff, API-imports-don't-match-People, re-record-wipes-without-confirm, Voices-is-People-only, "not exercised in the running app") are accurate. The cross-cutting spec properties hold on all new code:
+Items 1–2 are a correct, conformant implementation of the **text-chat-with-read-aloud** subset of §2.2A, with two real conformance bugs found during this review and **fixed as part of it** (both small, both directly contradicted M4.md item 1's own written acceptance text — see §2). Everything else traced in §3 held up: no raw audio crosses the boundary (not yet implicated at this stage), no silent engine fallback, write-race safety, streaming/abort semantics, and the read-aloud hook shapes all match spec intent.
 
-- **IPC rule (§3.2):** no raw audio crosses the boundary in any M3 path; imports pass paths; enrollment passes `embedding.bin` refs, not arrays; events carry text/labels/derived stats only.
-- **Privacy mode (§3.4):** the import dialog resolves through the router (API hard-filtered); the API import's diarization leg independently re-resolves; no path fires an API call under privacy mode.
-- **No silent local↔API fallback (§3.4):** import paths branch strictly on the resolved engine's kind; failures set `status:"error"`, never reroute.
-- **Storage (§4):** all new files land in the spec'd layout under `~/.vocalis/` (WAV divergence recorded); marker scan clean; all 69 commands registered.
+Items 3–4 are **entirely unbuilt** — confirmed by file search (`chat_capture.rs`, `sentence-chunker.ts`, `playback-queue.ts` all absent), not just by the M4.md status line. M4's own exit criterion ("a hands-free, multi-turn voice conversation with natural interruptions works end-to-end") is not met. This is a deliberate, previously-scoped deferral, not an oversight — §4 restates it with a concrete build order and sequencing advice rather than just re-flagging it as missing.
 
-But "code-complete" is doing heavy lifting: **two of item 5's headline claims don't survive line-level reading** — the session scrubber cannot work (fed a `~` path the asset protocol never expands, H1) and the retention toggle doesn't control retention (H2). Both would have been caught by the deferred `desktop:dev` pass the records themselves flag. Alongside them: a privacy-relevant delete-during-recording resurrection (H3), a data-destroying corrupt-tree overwrite (H4), and a cluster of medium bugs in cancel/panic/race handling. Details in §3.
-
-**Prior-review follow-up: 11 of 14 findings fixed** (including both HIGH/MEDIUM deletion-guard bugs and both drifts); B10/B11/B12 remain open, B13 partially (§2).
+A related gap not previously called out on its own: **spec §2.7 names a distinct "Voice Chat" settings section (VAD thresholds, barge-in on/off, default voice/model) and a distinct "LLM Models" section — neither exists.** See §4.3.
 
 ---
 
-## 2. Prior review (M2.7+) — disposition of B1–B13, D1–D2
+## 2. Bugs found and fixed during this review
 
-| Finding | Status | Evidence |
-|---|---|---|
-| B1 registry leak (HIGH) | **FIXED** | `PipelineRegistry::finish()` (`pipeline/mod.rs:180`); every pipeline thread self-deregisters (asr `mod.rs:242`, kws `:349`, import `import.rs:70`, live `live_session.rs:71`). Stale doc comment on `stop()` (`mod.rs:134-136`) still claims the old behavior. |
-| B2 dictation invisible to guard | **FIXED** | `DictationEntry` stores paths (`dictation.rs:22-25`); `model_in_use` includes them (`state.rs:108`). |
-| B3 TTS chip truthfulness | **FIXED** | Chip + persisted engineId derive from the picked voice (`tts-tool.tsx:63-66,124,170-175`). Residual cosmetic: all local voices map to the single `local.kokoro-en` descriptor, so Piper shows as "Kokoro (local)". |
-| B4 TTS cache collisions | **FIXED** | Hash keys `provider:voice:model:speed:text` + per-provider ext (`port.ts:185-203`). |
-| B5 KWS restore | **FIXED** | `restoreRun` restores the keyword editor (`kws-tool.tsx:391-393`). |
-| B6 stereo separation | **FIXED** | `separate_file` decodes via symphonia (`speech.rs:1100-1103`). |
-| B7 eviction vs referenced wav | **FIXED** | mtime bump on cache hit (`speech.rs:372-377`); Waveform tolerates missing files. |
-| B8 ElevenLabs 0 s duration | **FIXED** | Derived from last word end (`elevenlabs.ts:56-64`). |
-| B9 speed param hygiene | **FIXED** | Legacy-model gate + `targetSupportsSpeed` slider gating. |
-| B10 unbounded base64 reads | **OPEN — worse** | `storage.ts:32-39` / `fs.rs:40-45` unchanged, and the M3 API import now pushes the whole normalized session wav through it (`run-import.ts:129`) — long imports are exactly the large-file case. Fix with M3 close. |
-| B11 download cleanup deletes install | **OPEN** | `download.rs:296-298` unconditional `remove_dir_all`; `model_delete` still ignores `DownloadRegistry`. Backlog. |
-| B12 alphabetical .onnx pick | **OPEN** | `registry/mod.rs:36-49` unchanged; new comment at `:46` describes an int8 preference the code doesn't implement — misleading. Backlog. |
-| B13 cosmetics | **PARTIAL** | React key fixed; still open: `kws_default_keywords` silent empty (`speech.rs:998`), stale `bpe.vocab` comment (`kws.rs:31-34`). |
-| D1 bench wav-only | **FIXED** | `read_wav_16k` → `decode_to_16k_mono` (`speech.rs:555-556`); picker filter widened. |
-| D2 API TTS cache gap | **FIXED** | `tts_cache_evict` command + pre-call cache-hit check (`port.ts:167-179`). |
+Both were in-scope to fix directly (narrow, low-risk, verified clean against `check-types`/`lint`/`test:run` — 319/319 pass) because they contradict M4.md item 1's own explicit acceptance text, not because they're new work:
+
+**Fixed — privacy mode blocked local LLMs too** (`src/lib/llm/stream-chat.ts`). M4.md item 1 states: *"in privacy mode only local providers (Ollama/LM Studio) are eligible."* The code instead threw unconditionally whenever `privacyMode` was on, regardless of provider — so enabling privacy mode disabled chat entirely, including against a local Ollama/LM Studio server, which is exactly the case privacy mode is supposed to still allow. Fixed to gate only on `!isLocalProvider(ref.provider)`. The code comment claiming this "mirrors dictation-polish.ts" was also corrected — `dictation-polish.ts` is API-only with no local path, so unconditional blocking is correct *there*; it was never actually analogous to chat's local-capable case, and the comment was misleading about why the two differ.
+
+**Fixed — model picker had no disabled-reason UI** (`src/components/chat/model-picker.tsx`). M4.md item 1 explicitly asks to "reflect [privacy mode] in the model picker's disabled reasons." Previously every cloud entry rendered as a plain clickable item regardless of whether a key was set or privacy mode was on — picking one you couldn't use only surfaced an error after hitting send. Fixed by reusing the existing `EngineChip` convention (`disabled={!eligible}` + a muted trailing reason label, `src/components/shared/engine-chip.tsx`): cloud entries now show "no API key" or "privacy mode" and are disabled accordingly; the local entry is unaffected.
 
 ---
 
-## 3. Bugs to fix (ranked)
+## 3. Confirmed correct (no action needed)
 
-### HIGH — all four block or invalidate the M3 exit test
-
-**H1 — Session scrubber and per-bubble playback are dead: Waveform gets a literal `~` path.** `session-view.tsx:204` passes `sessionAudioPath()` = `~/.vocalis/sessions/<id>/audio.wav` (`session-store.ts:27`) into `Waveform`, which calls `fetch(convertFileSrc(path))` / `new Audio(convertFileSrc(path))` (`waveform.tsx:34,88`). Rust fs commands tilde-expand; the asset protocol does not, and the literal `~` path never matches the `$HOME/.vocalis/**` scope. `pathExists` (Rust, expanded) returns true, so the UI confidently renders a broken waveform. Click-to-seek and `playRange` never work for any session. Bench tools only work because Rust hands them absolute paths. **Fix:** resolve via `getAppDataDir()` (the pattern `speaker-id-tool.tsx:76` already uses) or return the absolute path from Rust.
-
-**H2 — The retention toggle doesn't control retention (spec §2.2B).** `use-session-recorder.ts:118` starts the pipeline without `audioRetained`, so `local.ts:148` defaults it to `true` — Rust always writes `audio.wav` regardless of the toggle. Imports write it unconditionally. And nothing discards audio on close when `audioRetained === false`; the flag only hides the scrubber and gates the manual "Discard now" action. A privacy toggle that silently keeps the audio is a real conformance failure. **Fix:** pass `session.audioRetained` into `startSessionPipeline`, and delete `audio.wav` at completion when retention is off.
-
-**H3 — Deleting a session while it records resurrects the deleted directory with audio in it.** Sidebar delete → `removeSession` deletes `sessions/<id>/` → view unmounts → the recorder cleanup stops the pipeline *and* calls `updateSession(status:"complete")` (`use-session-recorder.ts:138-148`), which can re-write `session.json` from cache (fs `write_file` creates parent dirs). Independently, the Rust stop path always runs `create_dir_all` + writes `audio.wav` into the deleted dir (`live_session.rs:255-267`). Net: the user deleted a session; its audio persists on disk, invisible to the UI — against §4's retention guarantees. Imports have the same exposure. **Fix:** block or confirm deletion while status is recording/processing (stop and await the pipeline first), and make the unmount handler skip `updateSession` for removed sessions.
-
-**H4 — A corrupt `chats/tree.json` is silently discarded, then permanently overwritten.** `collection-store.ts:84-94` sets `loaded: true`, catches any read/parse error, and leaves `tree: []`; the next mutation `commit()`s the empty tree to disk (`:66-69`) — destroying the folder structure and the only record of which sessions exist (their dirs become orphans). **Fix:** distinguish missing-file from parse/read error; on error, back up to `tree.json.bak` and refuse mutations (or surface a repair prompt). Same pattern for `transcript.json` (M10).
-
-### MEDIUM
-
-**M1 — Pipeline threads are not panic-safe; one panic wedges sessions until app restart.** `active.store(false)` and `registry.finish(id)` run only on normal return (`live_session.rs:66-73`, `import.rs:67-71`); a panic in sherpa FFI or a slice op unwinds past both — `session_active` stays true (every future start rejected) and the registry pins six model dirs. **Fix:** an RAII drop guard owning the flag + registry id.
-
-**M2 — `PipelineRegistry::stop()` removes the entry exactly when the session's long tail begins.** Stop → ASR flush → audio write → minutes-long diarization refinement, all with the entry already gone (`mod.rs:137-145`), so `model_delete` can rip the diarization/speaker model out mid-refinement and the pass silently degrades. **Fix:** `stop()` only flips the flag; the entry is removed in `finish()`.
-
-**M3 — Device loss mid-session is silent, and the disconnect path discards the meeting.** cpal's error callback only logs (`capture.rs:93`); the data callback keeps the `Sender` alive, so the pipeline's `Disconnected` branch never fires on device loss — the session just stops receiving audio with no `Error` event. And if `Disconnected` ever does fire, that path returns before audio write/refinement/`Stopped` (`live_session.rs:169-174`) — the whole meeting's retained audio and settled transcript are dropped. **Fix:** surface stream errors via a shared flag; route capture failure through the normal stop path (write audio, refine, emit Error + Stopped).
-
-**M4 — Diarizer-failure fallback strips enrolled-Person names the live pass already assigned.** `online_labels` hardcodes `person_id: None` (`live_session.rs:323-334`, note the unused `_labeler`), so the `Refined` event downgrades real names to letters — the opposite of §7.3's stated fallback ("speaker-ID-only naming"). **Fix:** run `cluster_means_to_people` over the online clusters (already imported at `:345`).
-
-**M5 — Refinement "overlap voting" is argmax over single diar spans, not overlap summed per speaker.** Transcript segments are continuous (up to ~30 s) and routinely straddle several diar spans; a segment with 0.8 s of speaker 1 across two spans and 0.5 s of speaker 2 in one span gets labeled speaker 2 (`live_session.rs:418-447`; tests only cover single-span cases). **Fix:** accumulate overlap into a per-speaker map, then argmax.
-
-**M6 — Import cancel is broken in all three layers.** (a) Rust emits plain `Stopped` on cancel (`import.rs:144-147`), (b) `run-import.ts:175-178,217` treats `stopped` as success and persists the truncated session as `status:"complete"`, and (c) no UI can trigger cancel anyway — the dialog disables its close button while running (`import-dialog.tsx:96`) and never calls `ImportHandle.cancel`, so §2.2B's "import runs … are cancelable" is unmet and a hung import wedges a modal over the app. Also the stop flag is only checked between spans, so cancelling during whole-clip diarization or a long span's whisper chunks has minutes of latency (`import.rs:125,144,215`). **Fix:** distinguish cancelled from completed (flag or event payload), add a Cancel button, check `stop` between ASR chunks.
-
-**M7 — API import with no word timestamps persists an empty transcript as "complete".** Turns are built solely from `result.words` (`run-import.ts:139`); every adapter defaults `words: []`, and `result.text` is ignored — a paid transcription is discarded. **Fix:** fall back to a single turn from `text` over 0..durationMs.
-
-**M8 — Unserialized read-modify-write on all M3 JSON state.** `updateSession` (`session-store.ts:108-119`), `saveTranscript`/`persistTranscript` (fire-and-forget at `use-session-recorder.ts:70`, `run-import.ts:169`), and every collection-store mutation (`collection-store.ts`, all `get().tree` → await write → set, with fire-and-forget UI callers) can interleave: the refined-transcript write can race the final status write (session persistently stuck at "processing" — `refined` and `stopped` arrive back-to-back), overlapping tree ops silently drop each other's changes. **Fix:** serialize writes per file (promise chain per store/session id); await the refined persist before the status update.
-
-**M9 — Path traversal: `personId`/`sessionId` joined into paths unvalidated.** `people.rs:22-24`, `speech.rs:195,251,297` — `..` or an absolute path escapes `~/.vocalis`. Defense-in-depth today (ids are webview-generated uuids), but the repo already has the exact guard: `validate_path_component` (`registry/download.rs:211`). **Fix:** one line per command.
-
-**M10 — Corrupt `transcript.json` returns `[]` and is overwritten by the next edit** (`session-store.ts:74-86`) — silent transcript loss. Same quarantine treatment as H4.
-
-**M11 — Import dialog "Try again" creates a duplicate error session per attempt** (`import-dialog.tsx:125` resets the form; `start()` re-runs `createLeaf`+`createSession`). Reuse the first attempt's session id.
-
-**M12 — Double-start race in the recorder.** The guard checks `pipelineId.current` but it's only set after the await (`use-session-recorder.ts:104,118`); two same-tick starts → the loser's `finish("error")` clobbers the winner's id and marks the session "error" while it records on, unstoppable from the UI. Set a synchronous starting flag.
-
-**M13 — `onDeleteLeaf` failures are swallowed** (`collection-store.ts:150`, `.catch(() => {})`): a failed session-dir delete leaves orphaned audio with the tree entry already gone, silently. Await and surface.
-
-### LOW
-
-- **L1** Embed failure mints a new speaker per turn — live speaker inflation A,B,C… for one voice; refinement corrects it (`live_session.rs:224-227`).
-- **L2** Whole session buffered in RAM as f32 (~230 MB/hour) even with retention off; refinement is one synchronous pass with a single `Processing` event and no progress (`live_session.rs:131,200`).
-- **L3** `has_sentence_punctuation` counts `.`/`,` inside numbers ("3.5", "1,000") and skips the punctuator on unpunctuated text (`import.rs:270`).
-- **L4** `decode.rs` locks the sample spec from the first frame and treats `ResetRequired` as EOF — mid-stream spec changes truncate silently (`decode.rs:68,78-82`).
-- **L5** Streamed vs settled speaker letters can swap when an early span transcribes empty (`import.rs:233` resettles over non-empty spans only).
-- **L6** Wrong-dimension `embedding.bin` (after switching the embedding model) scores 0.0 against everything — enrollment silently stops matching (`speaker.rs:64` + `people.rs` accepts any dim). Record dim in profile.json or warn on mismatch.
-- **L7** `stop()` rejection is unhandled — recorder stuck at "Refining…" with no retry (`use-session-recorder.ts:126-132`).
-- **L8** Unknown engineId falls into the local import branch instead of throwing (`run-import.ts:210`).
-- **L9** Rename pre-fill commits the *resolved* name on unchanged blur, permanently overriding the Person link's display (`transcript-list.tsx:131`); seed with `ref?.name ?? ""` or skip no-op commits.
-- **L10** Session-audio write failure emits `Error` then continues to `Stopped` → recorder overwrites the "error" status with "complete" while `session.error` stays populated (`live_session.rs:257-264` + recorder `stopped` handler).
-- **L11** During API/import streaming all bubbles share one color (`session.speakers` empty until refined; `speakerColor(Math.max(0,-1))`).
-- **L12** SRT cues corrupted by edited text containing a blank line (`format.ts:78`; textarea allows it) — collapse blank lines in cues.
-- **L13** Corrupt/missing `session.json` renders a permanent "Loading session…" (`session-view.tsx:109-115`); no actionable error (§4).
-- **L14** People keyed by `profile.id` but read by dirname; a mismatch duplicates on update and strands the original on remove (`people-store.ts:65-79`).
-- **L15** Person delete is one-click destructive, no confirm (`person-detail.tsx:81`); dangling `SpeakerRef.personId`s degrade gracefully.
-- **L16** Tree leaf with missing `kind` skips cleanup on delete and renders as a stuck SessionView (`collection-store.ts:150`, `chat-content.tsx:24-33`).
-- **L17** Folder-name dedupe checks leaf names only; `getSiblingFolderNames` exists unused (`chat-sidebar.tsx:90-93`).
-- **L18** Stale doc comments: `PipelineRegistry::stop` (pre-`finish()` claim), `session.ts:7` says `audio.flac`, `registry/mod.rs:46` int8-preference comment, `kws.rs:31-34` `bpe.vocab`.
+- **No silent API fallback (§3.4):** `synthesizeMessageSpeech` resolves TTS through `resolveEngine("tts", ctx)` and throws rather than substituting a different engine kind; the router independently hard-filters `kind: "api"` under privacy mode, so read-aloud was never affected by the chat bug above.
+- **Store size discipline (§3.6):** `chat-store.ts` is 145 lines against a ~400-line budget; streaming state deliberately lives in `use-chat-stream.ts`, not the store.
+- **Write-race safety:** per-conversation `serialize()` via `write-queue.ts` matches the established M3 collection-store pattern.
+- **Streaming/abort semantics:** token deltas stay local until turn completion; abort vs. provider-error is correctly distinguished via `AbortController.signal.aborted` — a stopped turn persists silently, a genuine error sets `message.error`.
+- **Read-aloud hook shapes (§6):** `stripMarkdownForSpeech`/`MAX_SPEECH_INPUT_CHARS` were ported under the exact names spec's reuse-map table calls for. Single-active-playback is preserved (adapted from Sapio's per-message-instance pattern into a conversation-scoped hook, `use-message-playback.ts` — a reasonable fit for Vocalis's message-list UI, not a deviation from intent). Traced the token-guard and old/new-`<audio>`-element handoff in `play()`/`stop()` for races: none found — stale async resolutions and superseded playback are correctly no-op'd via the `tokenRef` counter.
+- **Auto-title on first turn:** keeps the persisted title and sidebar tree label in sync via both `chatStore.updateConversation` and `useChatsCollection.rename()`.
+- **IPC boundary (§3.2):** not yet implicated — items 1–2 are pure webview/text; correctly out of scope until item 3 introduces raw audio capture.
 
 ---
 
-## 4. Undocumented spec gaps — record in M3.md or amend spec.md
+## 4. Deferred items — status and recommendations
 
-1. **§7.7 / M3 plan "load via SpeechState, don't spawn private instances" — violated silently.** Live + import pipelines construct private `Punctuator`, `SpeakerEmbedder`, `Diarizer` (`live_session.rs:98-113,284`; `import.rs:100-120`) — a session can hold two copies of the embedding model (its own + the diarizer's + possibly the warm slot). Per-pipeline VAD/streaming-ASR sessions are defensible (stateful). [Either route the shareable engines through `SpeechState` or record the deviation + memory cost.]
-2. **§3.5 "per-person tunable" match threshold** — global constant `SESSION_MATCH_THRESHOLD = 0.55` (`speech.rs:156`); no per-person field in the schema (the "no-migration" claim has this one hole). [Record as deferred or amend spec.]
-3. **§2.2B cancelable imports** — see M6; not flagged in the build record (which mentions Rust cancel but not that no UI reaches it).
-4. **§2.2B retention "discards it on close"** — see H2; the records only flag WAV-vs-FLAC.
-5. **M3 item 3 plan "enroll from these segments"** (enroll a new Person from session audio) — not implemented, not recorded as deferred; only assign-to-existing-Person exists.
-6. **§2.1 engine indicator** — session view shows `session.engineId` as plain header text; live sessions have `engineId: null`, so live capture has no chip/override surface at all.
-7. **§3.6 "each colocated-tested"** — `people-store` and `chats-collection` have no test files; the aggregate "291 pass" hides this.
-8. **§4 "actionable errors"** — every corrupt-state path is a `console.warn`; nothing reaches the user (H4/M10/L13 are the sharp edges).
-9. **§3.2 "VAD — gate + endpointing"** — session VAD only emits `VadState`; ASR consumes all audio and self-endpoints. Same reading as M0/dictation, so likely an accepted project-wide interpretation — say so once in spec.md.
-10. **§2.2B JSON export "confidence"** — plumbed end-to-end but no engine ever populates it; always absent in practice.
+### 4.1 M4 item 3 — Voice turn pipeline (Rust capture, sentence chunker, playback queue)
 
----
+Confirmed absent via search: no `src-tauri/src/pipeline/chat_capture.rs`, no `src/lib/audio/sentence-chunker.ts`, no `src/lib/audio/playback-queue.ts`.
 
-## 5. Deferred items — disposition
+Recommended build order (matches M4.md's own item-3 ordering, restated with the dependency reasoning):
+1. **`chat_capture.rs` first.** Same thread-owning shape as the existing dictation capture pipeline — copy a known-good pattern rather than design a new one. Nothing downstream (chunking, playback, barge-in) can be exercised without real `Partial`/`Final`/`VadState` events to drive it.
+2. **`sentence-chunker.ts` next, as a pure TS unit with no engine dependency.** Spec calls out specific edge cases to unit-test (abbreviations, numbers, code blocks — skip code blocks for speech); all of this can be built and fully tested against synthetic streamed text before it's wired to a live LLM stream or TTS.
+3. **`playback-queue.ts` + per-sentence look-ahead synthesis last**, once chunked text exists to feed it.
 
-Effort: S < ½ day, M = 1–3 days, L > 3 days.
+Keep the `playback_state(active: bool)` → VAD-threshold-raise coupling (echo gating, §3.2/§7.4) as its own step after the queue works standalone — that lets the echo-gating logic be verified independently of barge-in's cancellation logic (item 4), instead of debugging both interacting bugs at once.
 
-| # | Item | Current state | Recommendation | Effort | When |
-|---|---|---|---|---|---|
-| 1 | **FLAC audio** (spec §4; recorded WAV fallback in M3 items 2/3/4) | WAV everywhere; no FLAC encoder in tree | WAV is fine for v1 (16 kHz mono ≈ 115 MB/h; FLAC ≈ halves it). **Amend spec §4 to "WAV (FLAC planned)"** or add `flacenc` encode-on-stop when disk pressure appears. Don't block M3. | M | backlog |
-| 2 | **Deepgram streaming WS** (from M2) | Still `implemented:false`; punt recorded in current_plan | Unchanged: post-M3. Note it gates the FR-streaming routing default before M4's chat surface claims FR support. | M | pre/with M4 |
-| 3 | **KWS plain-text keywords** (M2) | Unchanged; `bpe.model` ships so a sentencepiece port is feasible | Backlog, with the B13 stale-comment fix now | M | backlog |
-| 4 | **B10 base64 size guard** | Open, and the M3 API import made it bite harder (§2) | Size cap (~25 MB, OpenAI's limit) + chunked conversion; consider a Rust-side multipart upload later | S | **M3 close** |
-| 5 | **B11 / B12 / B13 leftovers** | Open (§2) | Backlog as previously ranked | S each | backlog |
-| 6 | **campplus French discrimination** (open gate, trigger point passed) | Enrollment built on the unvalidated model | As previously recommended: fold into the M3 exit test — enroll two French speakers; if weak, add `eres2netv2` catalog entry and re-run fixtures | S–M | **M3 exit test** |
-| 7 | **M2 live passes** (items 1–8 pages; item 9 keyed APIs; piper-fr download-test) | Still pending | Run together with the M3 exit test after §6 step 1 lands — one `desktop:dev` campaign, not two | — | M2/M3 close |
-| 8 | **M3 live exit test** | Pending (the record's own gate) | Blocked on H1/H2/H3 at minimum — the test would fail on the scrubber alone. Run after §6 step 1. | — | M3 close |
-| 9 | **Whisper word timestamps** (M2) | Data problem unchanged; import word-timing would benefit | Unchanged: source a timestamped export if word-timing matters for exports; else backlog | M | backlog |
-| 10 | **ZipVoice spike listen** (M5 gate) | Still pending | Do it before any M5 planning; 15 minutes | S | before M5 |
-| 11 | **Dead M0-era commands** | `read_config`/`save_config`/`get_home_dir` + `dictation_force_stop` wrapper registered but unreachable | Delete or add a keep-comment | S | any cleanup pass |
-| 12 | **Enrollment clips WAV** (item 3 deferral) | Accurate; folds into #1 | Same disposition as #1 | — | — |
+### 4.2 M4 item 4 — Turn-taking, barge-in, and modes
 
----
+Confirmed absent: no barge-in cancellation logic, no push-to-talk mode, no Voice Chat settings section, no EngineChip on the chat surface for STT.
 
-## 6. Recommended path to closing M3
+- **Barge-in + echo mitigation v1** are the highest-risk, hardest-to-verify pieces in all of M4 — they require on-device testing with real speakers/headphones per the spec's own exit test, not just unit coverage. Budget real iteration time against the ~150 ms interrupt-latency target and the "no echo loops with speakers" bar; don't treat this like items 1–2, where code-complete-then-verify was a reasonable two-phase split.
+- **Push-to-talk** is comparatively cheap (same capture pipeline, gated by key state instead of VAD endpointing) and could be sequenced *before* barge-in if hands-free interruption logic turns out to be the long pole — it exercises and de-risks the capture pipeline in isolation, without needing barge-in's cancellation race to also work.
+- **Do not build AEC now** — spec explicitly defers it to v2. The in-scope v1 mitigation is playback-aware VAD gating + a "use headphones" onboarding hint, nothing more.
 
-1. **Fix before the live exit test** (the test is otherwise guaranteed to fail or lie):
-   - **H1 scrubber path + H2 retention** — both small, both in item 5's headline claims.
-   - **H3 delete-during-recording + H4 tree quarantine + M10 transcript quarantine** — the data-safety cluster.
-   - **M1 panic guard + M2 stop/finish split** — one pass over `pipeline/mod.rs` + the two thread spawns.
-   - **M3 capture-error surfacing** — a meeting recorder that can silently record nothing fails its one job.
-   - **M4 fallback names + M5 overlap voting** — small, pure-core, already unit-test-shaped.
-   - **M6 cancel semantics + M7 words fallback + M11 retry duplicate** — the import correctness cluster.
-   - **M8 write serialization + M12 start race** — one shared "serialize per-id writes" helper covers both stores.
-   - **M9 + B10** — the two one-liner-ish hardening items (`validate_path_component`, size cap).
-2. **Documentation sweep** — record §4's gaps in M3.md (SpeechState deviation, per-person threshold, enroll-from-segments, engine chip on sessions, missing store tests) or amend spec.md where the cut is permanent (VAD-as-indicator reading, confidence field, WAV convention per §5 item 1). Fix the four stale comments (L18).
-3. **Run the combined live campaign**: M2 items 1–8 pages, item 9 keyed APIs (+ piper-fr download-test), M3.4 import pass (real mp3/m4a/flac), M3 exit test (live multi-speaker session incl. two French speakers for gate #6, scrub, edit, rename/merge/assign, three exports, retention toggle + discard). Record results in M2.md/M3.md, close both milestones.
-4. **Backlog** (post-M3): FLAC, Deepgram streaming (pre-M4), KWS tokenization, B11/B12/B13 leftovers, whisper timestamps, LOW items L1–L17 not swept up above, dead-command cleanup.
+### 4.3 Voice Chat / LLM Models settings sections (§2.7) — missing, not previously called out on its own
+
+`spec.md` §2.7 names eight settings sections: Appearance, API Keys, Engines & Routing, Models, Dictation, **Voice Chat** (VAD thresholds, barge-in on/off, default voice/model), **LLM Models** (pi-ai provider model picker), Audio, Advanced. The actual sidebar (`src/components/settings/sections.ts`) also has eight sections, but they don't map one-to-one: there is no "Voice Chat" section, and no separate "LLM Models" section — what exists under the single "Chat" section (`chat-settings.tsx`) is only local-LLM-server config (provider toggle, base URL, model name). Cloud model selection lives exclusively in the inline per-conversation `ModelPicker`; nothing about it appears in Settings.
+
+This is consistent with items 3–4 being unbuilt (there's nothing to configure VAD thresholds or barge-in for yet), but worth surfacing explicitly rather than leaving implicit: **the Voice Chat settings section should land alongside item 4**, not get treated as a UI afterthought once the pipeline already exists. Separately, M4.md item 1's own original-plan text ("`components/settings/model-picker.tsx` → the LLM Models settings section") implies a dedicated section was intended but never built — only the per-conversation dropdown was. Recommend deciding now whether "LLM Models" becomes its own section or stays folded into "Chat," since that's a cheap decision today and a more disruptive one once more settings code accretes around the current "Chat" section.
+
+### 4.4 Per-conversation voice picker
+
+Already flagged as a caveat in `M4.md` item 2 — restated here because it's a real §2.2A requirement ("Voice picker per conversation... model picker per conversation") where only the model half exists. `conversation.voiceId` and the read-aloud resolver both already support it; only the picker UI is missing. Low effort relative to items 3–4, and useful for read-aloud today independent of voice-mode — recommend building it as a small standalone follow-up to item 2 rather than bundling it into the much larger item 3/4 work.
+
+### 4.5 EngineChip on the chat surface for STT
+
+Spec-required once streaming ASR is wired into chat (item 3), not before — no action needed until then. Note for later: the routing matrix's FR default (Deepgram) depends on the M2 Deepgram streaming adapter, which `current_plan.md` already tracks as not yet landed. Item 3 inherits that open dependency rather than creating a new one.
 
 ---
 
-## Appendix — per-item conformance summary
+## 5. Adjacent findings (out of scope for M4, noted for awareness only)
 
-| M3 item | Spec conformance | Build-record accuracy | Blocking issues |
-|---|---|---|---|
-| 1 — schemas / collection kit / chat shell | Met; §3.6 test rule missed for 2 stores | Truthful | **H4**, M8, M13 |
-| 2 — live session pipeline | Met with recorded deferrals; §7.7 SpeechState deviation unrecorded | Truthful (incl. the enrolled-wiring handoff to item 3) | M1–M5 |
-| 3 — People enrollment | Met; per-person threshold + enroll-from-segments unrecorded | Truthful | M9, L6, L14 |
-| 4 — file import | Met except cancelability (§2.2B) | Truthful | M6, M7, B10 |
-| 5 — session UI + exports | **Two headline claims don't hold** (scrubber H1, retention H2); rest met | Honest-but-unverified — the "not exercised" caveat carried the risk | **H1, H2, H3**, M8, M11, M12 |
+- `dictation-polish.ts` has the same "privacy mode + provider capability" shape as the bug fixed in §2, but its unconditional block is correct as-is — it has no local-model path at all (OpenAI/Groq only). The two functions now diverge for a real reason (one has a local option, one doesn't), not by accident; no fix needed there.
+- `src/index.css` has dead `[data-streamdown="code-block-body"]` / `.shiki` rules (flagged by `bun run lint` as pre-existing warnings, unrelated to any change in this review) with no corresponding `streamdown`/`shiki` dependency in `package.json` — looks like leftover CSS from the Sapio-derived skeleton. Harmless today; if a markdown renderer is ever added to chat (still explicitly out of scope per M4.md item 2), check whether these rules were meant for it before writing new ones.
+
+---
+
+## 6. Priority order for next session
+
+1. **Live `desktop:dev` pass over M4 items 1–2** (already tracked in `current_plan.md`) — do this before building more on top of unverified UI, especially now that model-picker behavior and privacy-mode gating changed in this review.
+2. **Per-conversation voice picker** (§4.4) — small, high value, unblocks read-aloud voice selection today.
+3. **Voice Chat / LLM Models settings IA decision** (§4.3) — naming/structure only; cheap to decide now, expensive to unwind later.
+4. **M4 item 3**, in order: `chat_capture.rs` → `sentence-chunker.ts` → `playback-queue.ts` (§4.1).
+5. **M4 item 4**: barge-in, echo mitigation v1, push-to-talk, Voice Chat settings UI (§4.2) — budget for on-device iteration, not a single code-complete-then-verify pass like items 1–2.

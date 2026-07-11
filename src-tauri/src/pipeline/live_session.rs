@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -7,12 +8,13 @@ use tauri::ipc::Channel;
 
 use crate::audio::{AudioCapture, TARGET_SAMPLE_RATE};
 use crate::engines::{
-    cosine_similarity, DiarizationParams, Diarizer, Punctuator, SpeakerEmbedder, SpeechDetector,
-    StreamingAsrSession,
+    cosine_similarity, DiarizationParams, Diarizer, OfflineAsr, Punctuator, SpeakerEmbedder,
+    SpeechDetector,
 };
 use crate::pipeline::{
-    accumulate, cluster_means_to_people, letter_label, match_person, relabel_by_first_appearance,
-    level_of, DropGuard, EnrolledSpeaker, PipelineEvent, PipelineRegistry, SessionSegment,
+    accumulate, cluster_means_to_people, letter_label, level_of, match_person,
+    relabel_by_first_appearance, relabel_continuing_from_resume, transcribe_utterance, DropGuard,
+    EnrolledSpeaker, PipelineEvent, PipelineRegistry, ResumeSegment, SessionSegment,
     LEVEL_INTERVAL,
 };
 
@@ -22,6 +24,11 @@ use crate::pipeline::{
 // ways: it retains the whole session to disk (for the scrubber), labels each
 // turn with an online provisional speaker, and — on stop — runs an offline
 // diarization refinement pass over the retained audio before settling labels.
+//
+// Turn boundaries are VAD-driven, not ASR-driven: the whole-session `buffer`
+// is retained as before, but each VAD-bounded utterance is batch-decoded in
+// one pass on the falling edge (spec §0/§3.2) instead of being fed
+// incrementally to a streaming session.
 
 pub struct SessionPipelineModels {
     pub asr_dir: PathBuf,
@@ -42,6 +49,9 @@ pub struct SessionPipelineModels {
     pub cluster_threshold: f32,
     /// Cosine threshold for matching an enrolled Person.
     pub match_threshold: f32,
+    /// Prior transcript segments, when resuming a non-draft session (empty for
+    /// a fresh session) — seeds speaker-cluster + audio continuity.
+    pub resume_segments: Vec<ResumeSegment>,
 }
 
 /// Start a live session pipeline on its own thread. `active` guards against a
@@ -102,7 +112,7 @@ fn run_session_pipeline(
         Ok(v) => v,
         Err(message) => return send(PipelineEvent::Error { message }),
     };
-    let mut asr = match StreamingAsrSession::new(&models.asr_dir, models.num_threads) {
+    let asr = match OfflineAsr::new(&models.asr_dir, models.num_threads, None) {
         Ok(a) => a,
         Err(message) => return send(PipelineEvent::Error { message }),
     };
@@ -131,14 +141,39 @@ fn run_session_pipeline(
         models.match_threshold,
         models.enrolled.clone(),
     );
+
+    // Resuming a session that already has retained audio: preload it so the
+    // new run's sample-index math (segment spans, VAD boundaries) continues
+    // naturally from where the prior run left off, instead of restarting at 0.
     let mut buffer: Vec<f32> = Vec::new();
-    let mut seg_start_sample: usize = 0;
+    let mut audio_resumed = false;
+    if models.audio_retained {
+        let existing = models.session_dir.join("audio.wav");
+        if existing.exists() {
+            match crate::audio::decode_to_16k_mono(&existing) {
+                Ok(samples) => {
+                    buffer = samples;
+                    audio_resumed = true;
+                }
+                Err(e) => log::warn!("[session] resume: failed to decode existing audio: {e}"),
+            }
+        }
+    }
+    if audio_resumed && !models.resume_segments.is_empty() {
+        seed_labeler_from_resume(&mut labeler, &embedder, &buffer, &models.resume_segments);
+    }
+
+    let mut seg_start_sample: usize = buffer.len();
+    // Sample index (into `buffer`) where the in-progress utterance started,
+    // set on the VAD rising edge; `None` while VAD reports silence.
+    let mut utterance_start: Option<usize> = None;
     let mut segments: Vec<CapturedSegment> = Vec::new();
     let mut last_level = Instant::now();
 
     while !stop.load(Ordering::Relaxed) && !capture.stream_error.load(Ordering::Relaxed) {
         match audio_rx.recv_timeout(Duration::from_millis(30)) {
             Ok(samples) => {
+                let chunk_start = buffer.len();
                 buffer.extend_from_slice(&samples);
                 if last_level.elapsed() >= LEVEL_INTERVAL {
                     last_level = Instant::now();
@@ -147,25 +182,22 @@ fn run_session_pipeline(
                 }
                 if let Some(speaking) = vad.push(&samples) {
                     send(PipelineEvent::VadState { speaking });
-                }
-                let decode_started = Instant::now();
-                if let Some(text) = asr.push(&samples) {
-                    send(PipelineEvent::Partial {
-                        text,
-                        latency_ms: decode_started.elapsed().as_secs_f32() * 1000.0,
-                    });
-                }
-                if let Some(segment) = asr.take_final() {
-                    emit_turn(
-                        segment.text,
-                        &buffer,
-                        &mut seg_start_sample,
-                        &punctuator,
-                        &embedder,
-                        &mut labeler,
-                        &mut segments,
-                        &send,
-                    );
+                    if speaking {
+                        utterance_start = Some(chunk_start);
+                    } else if let Some(start) = utterance_start.take() {
+                        transcribe_and_emit_turn(
+                            &asr,
+                            &buffer,
+                            start,
+                            &mut seg_start_sample,
+                            &punctuator,
+                            &embedder,
+                            &mut labeler,
+                            &mut segments,
+                            &stop,
+                            &send,
+                        );
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -183,16 +215,22 @@ fn run_session_pipeline(
         });
     }
 
-    // Stop requested (or device lost): flush the ASR tail, then stop capture.
-    if let Some(text) = asr.finish() {
-        emit_turn(
-            text,
+    // Stop requested (or device lost) mid-utterance: decode whatever's
+    // buffered as a synthetic falling edge. Uses a fresh flag rather than the
+    // pipeline's own `stop` (already true here) so this final decode always
+    // runs to completion instead of bailing immediately.
+    if let Some(start) = utterance_start.take() {
+        let no_cancel = AtomicBool::new(false);
+        transcribe_and_emit_turn(
+            &asr,
             &buffer,
+            start,
             &mut seg_start_sample,
             &punctuator,
             &embedder,
             &mut labeler,
             &mut segments,
+            &no_cancel,
             &send,
         );
     }
@@ -205,9 +243,49 @@ fn run_session_pipeline(
     send(PipelineEvent::Processing {
         message: "refining speakers".into(),
     });
-    let refined = refine(&models, &buffer, &segments, &labeler);
+    let refined = refine(&models, &buffer, &segments, &labeler, audio_resumed);
     send(PipelineEvent::Refined { segments: refined });
     send(PipelineEvent::Stopped);
+}
+
+/// Batch-decode one VAD-bounded utterance (`buffer[utterance_start..]`) and,
+/// if it produced any text, hand it to `emit_turn`. Sends a `Processing`
+/// status first so the frontend can show "Transcribing…" for the decode
+/// window. `stop` cancels an in-flight decode (checked between chunks); pass
+/// a fresh never-cancel flag when the utterance must be flushed unconditionally.
+#[allow(clippy::too_many_arguments)]
+fn transcribe_and_emit_turn(
+    asr: &OfflineAsr,
+    buffer: &[f32],
+    utterance_start: usize,
+    seg_start_sample: &mut usize,
+    punctuator: &Punctuator,
+    embedder: &SpeakerEmbedder,
+    labeler: &mut OnlineLabeler,
+    segments: &mut Vec<CapturedSegment>,
+    stop: &AtomicBool,
+    send: &dyn Fn(PipelineEvent),
+) {
+    send(PipelineEvent::Processing {
+        message: "transcribing".into(),
+    });
+    let start = utterance_start.min(buffer.len());
+    let text = match transcribe_utterance(asr, &buffer[start..], stop) {
+        Ok(Some(transcription)) => transcription.text,
+        Ok(None) => return,
+        Err(message) => return send(PipelineEvent::Error { message }),
+    };
+    *seg_start_sample = start;
+    emit_turn(
+        text,
+        buffer,
+        seg_start_sample,
+        punctuator,
+        embedder,
+        labeler,
+        segments,
+        send,
+    );
 }
 
 /// Slice the current segment's audio, punctuate its text, embed + label it,
@@ -260,6 +338,41 @@ fn samples_to_ms(samples: usize) -> f64 {
     samples as f64 * 1000.0 / TARGET_SAMPLE_RATE as f64
 }
 
+fn ms_to_samples(ms: f64) -> usize {
+    (ms * TARGET_SAMPLE_RATE as f64 / 1000.0).round() as usize
+}
+
+/// Re-embed each of a resumed session's prior segments (sliced from the
+/// just-reloaded audio buffer at its known span — embeddings are never
+/// persisted to disk) and seed the labeler's clusters in first-appearance
+/// order, so a returning speaker's new utterances land in the same cluster
+/// (and therefore letter) they had before the pause.
+fn seed_labeler_from_resume(
+    labeler: &mut OnlineLabeler,
+    embedder: &SpeakerEmbedder,
+    buffer: &[f32],
+    resume_segments: &[ResumeSegment],
+) {
+    let mut cluster_by_label: HashMap<String, usize> = HashMap::new();
+    for seg in resume_segments {
+        let start = ms_to_samples(seg.start_ms).min(buffer.len());
+        let end = ms_to_samples(seg.end_ms).min(buffer.len());
+        if start >= end {
+            continue;
+        }
+        let Ok(embedding) = embedder.embed(&buffer[start..end]) else {
+            continue;
+        };
+        match cluster_by_label.get(&seg.speaker_label) {
+            Some(&c) => labeler.accumulate_into(c, &embedding),
+            None => {
+                let c = labeler.seed_cluster(&embedding);
+                cluster_by_label.insert(seg.speaker_label.clone(), c);
+            }
+        }
+    }
+}
+
 fn write_session_audio(session_dir: &std::path::Path, buffer: &[f32], send: &dyn Fn(PipelineEvent)) {
     if let Err(e) = std::fs::create_dir_all(session_dir) {
         return send(PipelineEvent::Error {
@@ -277,13 +390,21 @@ fn write_session_audio(session_dir: &std::path::Path, buffer: &[f32], send: &dyn
 
 /// Stop-time refinement: diarize the retained audio, re-map each transcript
 /// segment to the diarization speaker it most overlaps, re-letter by first
-/// appearance, and re-match enrolled people per refined cluster. Falls back to
-/// the online labels if diarization is unavailable or fails (spec §7.3).
+/// appearance (or, when resuming, by continuity with the prior run's labels —
+/// see `relabel_continuing_from_resume`), and re-match enrolled people per
+/// refined cluster. Falls back to the online labels if diarization is
+/// unavailable or fails (spec §7.3).
+///
+/// Note: this re-diarizes the *entire* buffer (old + new audio) on every
+/// stop — already true today for one long recording; a resumed session just
+/// means this cost (and the one-time audio decode on preload) grows with
+/// total session length across resumes, not a regression.
 fn refine(
     models: &SessionPipelineModels,
     buffer: &[f32],
     segments: &[CapturedSegment],
     labeler: &OnlineLabeler,
+    audio_resumed: bool,
 ) -> Vec<SessionSegment> {
     let online = || {
         let clusters: Vec<usize> = segments.iter().map(|s| s.cluster).collect();
@@ -323,7 +444,17 @@ fn refine(
 
     let spans: Vec<(f64, f64)> = segments.iter().map(|s| (s.start_ms, s.end_ms)).collect();
     let mapped = refine_speakers(&spans, &diar);
-    let clusters = relabel_by_first_appearance(&mapped);
+    let clusters = if audio_resumed && !models.resume_segments.is_empty() {
+        let resume_spans: Vec<(f64, f64)> = models
+            .resume_segments
+            .iter()
+            .map(|s| (s.start_ms, s.end_ms))
+            .collect();
+        let resume_diar_ids = refine_speakers(&resume_spans, &diar);
+        relabel_continuing_from_resume(&models.resume_segments, &resume_diar_ids, &mapped)
+    } else {
+        relabel_by_first_appearance(&mapped)
+    };
 
     // Re-match enrolled people per refined cluster from its segment embeddings.
     let person_for_cluster = match_clusters_to_people(&clusters, segments, labeler);
@@ -414,6 +545,21 @@ impl OnlineLabeler {
         i
     }
 
+    /// Open a new cluster seeded from a resumed session's prior segment
+    /// embedding, returning its index.
+    fn seed_cluster(&mut self, emb: &[f32]) -> usize {
+        let i = self.sums.len();
+        self.sums.push(emb.to_vec());
+        self.counts.push(1);
+        i
+    }
+
+    /// Fold another resumed segment's embedding into an already-seeded cluster.
+    fn accumulate_into(&mut self, cluster: usize, emb: &[f32]) {
+        accumulate(&mut self.sums[cluster], emb);
+        self.counts[cluster] += 1;
+    }
+
     /// Nearest enrolled person above the match threshold, if any.
     fn match_person(&self, emb: &[f32]) -> Option<String> {
         match_person(&self.enrolled, emb, self.match_threshold)
@@ -474,6 +620,19 @@ mod tests {
         assert_eq!(labeler.assign(&a2).0, 0, "similar voice joins cluster A");
         assert_eq!(labeler.assign(&b1).0, 1, "different voice opens cluster B");
         assert_eq!(labeler.assign(&a1).0, 0, "back to cluster A");
+    }
+
+    #[test]
+    fn online_labeler_seed_cluster_then_accumulate_matches_similar_voice() {
+        let mut labeler = OnlineLabeler::new(0.5, 0.9, Vec::new());
+        let a1 = vec![1.0, 0.0, 0.0];
+        let a2 = vec![0.9, 0.1, 0.0];
+        let b1 = vec![0.0, 0.0, 1.0];
+        let seeded = labeler.seed_cluster(&a1);
+        assert_eq!(seeded, 0);
+        labeler.accumulate_into(seeded, &a2);
+        assert_eq!(labeler.assign(&a1).0, 0, "similar voice joins the seeded cluster");
+        assert_eq!(labeler.assign(&b1).0, 1, "different voice opens a new cluster");
     }
 
     #[test]

@@ -18,6 +18,7 @@ import {
   findEngine,
   type SpeechTask,
 } from "@/lib/engines/descriptors";
+import type { InstalledModel } from "@/lib/schemas/catalog";
 
 export type IneligibleReason =
   | "not-implemented"
@@ -40,6 +41,8 @@ export interface RouterContext {
   apiProviders: ReadonlySet<string>;
   /** model-registry tasks with at least one installed model */
   installedTasks: ReadonlySet<string>;
+  /** every installed model, for engines that let the user pick among several */
+  installedModels: readonly InstalledModel[];
 }
 
 export interface EngineOption {
@@ -48,6 +51,8 @@ export interface EngineOption {
   reason?: IneligibleReason;
   /** true when this engine is the task's configured (or implicit) default */
   isDefault: boolean;
+  /** installed models serving engine.modelTask; empty for API engines */
+  models: InstalledModel[];
 }
 
 export interface EngineResolution {
@@ -97,6 +102,9 @@ export function taskOptions(task: SpeechTask, ctx: RouterContext): EngineOption[
     engine,
     ...evaluateEngine(engine, ctx),
     isDefault: engine.id === defaultId,
+    models: engine.modelTask
+      ? ctx.installedModels.filter((model) => model.task === engine.modelTask)
+      : [],
   }));
 }
 

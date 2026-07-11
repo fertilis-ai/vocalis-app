@@ -11,14 +11,15 @@ import { cn } from "@/lib/utils";
 // Chat-style transcript: segments grouped into contiguous speaker turns, each
 // turn headed by an editable, colored speaker name. Segments are click-to-play
 // (when audio is retained), hand-editable, and styled subtly while provisional
-// (spec §7.3). A live ASR partial renders as a trailing ghost line.
+// (spec §7.3). A trailing ghost line shows the current VAD/decode status
+// while recording (e.g. "Listening…" / "Transcribing…").
 
 interface TranscriptListProps {
   transcript: Transcript;
   speakers: SpeakerRef[];
   people: Record<string, Person>;
-  /** Live ASR partial shown as a ghost bubble while recording. */
-  partial?: string;
+  /** Status ghost line shown while recording, e.g. "Listening…" / "Transcribing…". */
+  statusLine?: string;
   /** Play [startMs, endMs) — omitted when no retained audio is available. */
   onPlay?: (startMs: number, endMs: number) => void;
   /** False while recording: edits are disabled mid-capture. */
@@ -49,7 +50,7 @@ export function TranscriptList({
   transcript,
   speakers,
   people,
-  partial,
+  statusLine,
   onPlay,
   editable,
   onRename,
@@ -83,7 +84,7 @@ export function TranscriptList({
     setEditingId(null);
   }
 
-  if (transcript.length === 0 && !partial) {
+  if (transcript.length === 0 && !statusLine) {
     return (
       <p className="px-4 py-8 text-center text-muted-foreground text-sm">
         No transcript yet.
@@ -196,13 +197,8 @@ export function TranscriptList({
         );
       })}
 
-      {partial && (
-        <div className="space-y-1">
-          <span className="text-muted-foreground text-sm italic">Speaking…</span>
-          <p className="border-muted-foreground/30 border-l-2 pl-3 text-muted-foreground text-sm italic">
-            {partial}
-          </p>
-        </div>
+      {statusLine && (
+        <span className="text-muted-foreground text-sm italic">{statusLine}</span>
       )}
     </div>
   );

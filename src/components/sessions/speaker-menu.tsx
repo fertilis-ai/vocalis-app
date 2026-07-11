@@ -2,6 +2,7 @@ import { Check, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -72,9 +73,11 @@ export function SpeakerMenu({
           <DropdownMenuSubTrigger>Assign to person</DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-48">
             {people.length === 0 && (
-              <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
-                No enrolled people
-              </DropdownMenuLabel>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
+                  No enrolled people
+                </DropdownMenuLabel>
+              </DropdownMenuGroup>
             )}
             {people.map((person) => (
               <DropdownMenuItem

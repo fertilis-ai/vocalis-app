@@ -3,10 +3,9 @@ import {
   Outlet,
   createRootRouteWithContext,
 } from "@tanstack/react-router";
-import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -22,6 +21,14 @@ import { initAppDataDir } from "@/lib/storage";
 import { useSettingsStore } from "@/stores/settings-store";
 
 import "../index.css";
+
+const TanStackRouterDevtools = import.meta.env.DEV
+  ? lazy(() =>
+      import("@tanstack/react-router-devtools").then((m) => ({
+        default: m.TanStackRouterDevtools,
+      })),
+    )
+  : () => null;
 
 export type RouterAppContext = Record<string, never>;
 
@@ -119,7 +126,9 @@ function RootComponent() {
         <Toaster richColors />
       </ThemeProvider>
       {import.meta.env.DEV && (
-        <TanStackRouterDevtools position="bottom-right" />
+        <Suspense fallback={null}>
+          <TanStackRouterDevtools position="bottom-right" />
+        </Suspense>
       )}
     </>
   );

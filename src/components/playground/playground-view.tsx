@@ -7,6 +7,7 @@ import { PunctuationTool } from "./punctuation-tool";
 import { SeparationTool } from "./separation-tool";
 import { SpeakerIdTool } from "./speaker-id-tool";
 import { SpeakerVerifyTool } from "./speaker-verify-tool";
+import { StreamingRecognitionTool } from "./streaming-recognition-tool";
 import { PLAYGROUND_TOOLS } from "./tools";
 import { TtsTool } from "./tts-tool";
 import { VadTool } from "./vad-tool";
@@ -17,6 +18,8 @@ export function PlaygroundView() {
   switch (tool) {
     case "asr":
       return <AsrTool />;
+    case "asr-streaming":
+      return <StreamingRecognitionTool />;
     case "tts":
       return <TtsTool />;
     case "vad":

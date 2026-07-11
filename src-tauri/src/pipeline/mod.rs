@@ -10,17 +10,21 @@ use tauri::ipc::Channel;
 use crate::audio::AudioCapture;
 use crate::engines::{KeywordSession, SpeechDetector, StreamingAsrSession, VadParams, WordSpan};
 
+mod chat_capture;
 mod dictation;
 mod import;
 mod live_session;
 mod recorder;
 mod speakers;
+mod vad_batch;
 
+pub use chat_capture::*;
 pub use dictation::*;
 pub use import::*;
 pub use live_session::*;
 pub use recorder::*;
 pub use speakers::*;
+pub use vad_batch::*;
 
 /// A finalized session segment, as carried by `SpeakerTurn` (live, provisional)
 /// and `Refined` (post-stop, settled). Mirrors the webview `TranscriptSegment`.

@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2, Play, Square } from "lucide-react";
+import { AlertTriangle, Bot, Loader2, Play, Square, User } from "lucide-react";
 import type { PlaybackStatus } from "@/lib/llm/use-message-playback";
 import type { ChatMessage } from "@/lib/schemas/chat";
 import { isDesktop } from "@/lib/storage";
@@ -24,17 +24,24 @@ export function MessageBubble({
   const isUser = message.role === "user";
   const showPlayback = !isUser && !streaming && message.content && isDesktop() && onToggleSpeech;
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
-      <div
-        className={cn(
-          "max-w-[75%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm",
-          isUser ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
-        )}
-      >
-        {message.content}
-        {streaming && <span className="ml-0.5 inline-block animate-pulse">▍</span>}
+    <div className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}>
+      {!isUser && (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+          <Bot className="h-4 w-4" />
+        </div>
+      )}
+      <div className={cn("max-w-[80%] space-y-2", isUser && "flex flex-col items-end")}>
+        <div
+          className={cn(
+            "whitespace-pre-wrap break-words rounded-lg px-4 py-2 text-sm",
+            isUser ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+          )}
+        >
+          {message.content}
+          {streaming && <span className="ml-0.5 inline-block animate-pulse">▍</span>}
+        </div>
         {showPlayback && (
-          <div className="mt-1.5 flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={onToggleSpeech}
@@ -53,12 +60,17 @@ export function MessageBubble({
           </div>
         )}
         {message.error && (
-          <p className="mt-1.5 flex items-center gap-1 text-destructive text-xs">
+          <p className="flex items-center gap-1 text-destructive text-xs">
             <AlertTriangle className="h-3 w-3 flex-shrink-0" />
             {message.error}
           </p>
         )}
       </div>
+      {isUser && (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
+          <User className="h-4 w-4" />
+        </div>
+      )}
     </div>
   );
 }

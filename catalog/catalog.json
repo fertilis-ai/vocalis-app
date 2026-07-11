@@ -49,6 +49,23 @@
       "recommended": true
     },
     {
+      "id": "parakeet-tdt-0.6b-v3-int8",
+      "task": "asr-batch",
+      "name": "Parakeet TDT v3 (25 languages)",
+      "description": "NVIDIA NeMo Parakeet TDT v3 transducer, converted to sherpa-onnx (encoder/decoder/joiner, int8) — fast offline transcription across 25 European languages including English and French.",
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "sizeBytes": 487170055,
+      "quantization": "int8",
+      "license": "CC-BY-4.0",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+      "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
+      "archive": "tar.bz2",
+      "recommended": false
+    },
+    {
       "id": "kokoro-en-v0_19",
       "task": "tts",
       "name": "Kokoro EN v0.19",

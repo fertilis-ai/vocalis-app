@@ -10,6 +10,7 @@ import {
   DEFAULT_LOCAL_LLM,
   DEFAULT_ROUTING,
   DEFAULT_TTS_CACHE_MAX_BYTES,
+  DEFAULT_VOICE_CHAT,
 } from "@/lib/schemas/config";
 
 export type DictationMode = "hold" | "toggle";
@@ -20,6 +21,16 @@ export interface DictationPrefs {
   polish: boolean;
   polishModel: string;
   historyEnabled: boolean;
+}
+
+export interface VoiceChatPrefs {
+  /** Silence duration (ms) before a hands-free turn endpoints. */
+  vadSilenceMs: number;
+  /** Interrupt playback on user speech-start (spec M4 item 4). */
+  bargeInEnabled: boolean;
+  /** Prefilled onto new voice-chat conversations; "" = engine/none default. */
+  defaultVoiceId: string;
+  defaultModelRef: string;
 }
 
 // Persisted via localStorage ("vocalis-settings") AND two-way synced with
@@ -40,12 +51,14 @@ interface SettingsState {
   /** provider -> API key (keychain-backed on desktop) */
   apiKeys: Record<string, string>;
   localLLM: LocalLlmSettings;
+  voiceChat: VoiceChatPrefs;
 
   setHue: (hue: HueId) => void;
   setPrivacyMode: (on: boolean) => void;
   setRouting: (routing: Record<string, string>) => void;
   setTaskEngine: (task: string, engineId: string) => void;
   setDictation: (updates: Partial<DictationPrefs>) => void;
+  setVoiceChat: (updates: Partial<VoiceChatPrefs>) => void;
   setActiveByTask: (activeByTask: Record<string, string>) => void;
   setActiveModel: (task: string, modelId: string) => void;
   /** Clear the slot only if it still points at modelId (e.g. after delete) */
@@ -69,6 +82,7 @@ export const useSettingsStore = create<SettingsState>()(
       ttsCacheMaxBytes: DEFAULT_TTS_CACHE_MAX_BYTES,
       apiKeys: {},
       localLLM: { ...DEFAULT_LOCAL_LLM },
+      voiceChat: { ...DEFAULT_VOICE_CHAT },
 
       setHue: (hue) => set({ hue }),
       setPrivacyMode: (privacyMode) => set({ privacyMode }),
@@ -77,6 +91,8 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ routing: { ...state.routing, [task]: engineId } })),
       setDictation: (updates) =>
         set((state) => ({ dictation: { ...state.dictation, ...updates } })),
+      setVoiceChat: (updates) =>
+        set((state) => ({ voiceChat: { ...state.voiceChat, ...updates } })),
       setActiveByTask: (activeByTask) => set({ activeByTask }),
       setActiveModel: (task, modelId) =>
         set((state) => ({ activeByTask: { ...state.activeByTask, [task]: modelId } })),
@@ -125,6 +141,7 @@ export const useSettingsStore = create<SettingsState>()(
         audioInputDevice: state.audioInputDevice,
         ttsCacheMaxBytes: state.ttsCacheMaxBytes,
         localLLM: state.localLLM,
+        voiceChat: state.voiceChat,
         // On desktop, apiKeys live in the OS keychain — never localStorage
         ...(isTauri() ? {} : { apiKeys: state.apiKeys }),
       }),

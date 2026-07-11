@@ -92,6 +92,15 @@ impl SpeechDetector {
     pub fn is_speaking(&self) -> bool {
         self.speaking
     }
+
+    /// Clear all detection state (Silero's internal state, the window buffer,
+    /// and the speaking flag) — for detectors that sit idle and are swapped in
+    /// mid-stream, e.g. the chat pipeline's playback-boosted detector.
+    pub fn reset(&mut self) {
+        self.vad.reset();
+        self.buffer.clear();
+        self.speaking = false;
+    }
 }
 
 /// One detected speech span, in seconds from the start of the audio.

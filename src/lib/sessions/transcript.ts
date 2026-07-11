@@ -35,6 +35,19 @@ export function toTranscript(turns: RawTurn[], provisional: boolean): Transcript
   }));
 }
 
+/**
+ * Prepend a session's already-settled segments to a freshly mapped batch of
+ * raw pipeline turns — the merge used when resuming a non-draft session so a
+ * new pipeline run's turns extend rather than replace the transcript.
+ */
+export function appendTurns(
+  prior: Transcript,
+  turns: RawTurn[],
+  provisional: boolean,
+): Transcript {
+  return [...prior, ...toTranscript(turns, provisional)];
+}
+
 /** Distinct speaker refs from segments, in order of first appearance. */
 export function speakersOf(segments: TranscriptSegment[]): SpeakerRef[] {
   const refs: SpeakerRef[] = [];

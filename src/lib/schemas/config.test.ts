@@ -4,6 +4,7 @@ import {
   DEFAULT_LOCAL_LLM,
   DEFAULT_ROUTING,
   DEFAULT_TTS_CACHE_MAX_BYTES,
+  DEFAULT_VOICE_CHAT,
   defaultConfig,
   parseConfig,
 } from "./config";
@@ -20,6 +21,7 @@ describe("config schema", () => {
       audio: { inputDevice: "" },
       cache: { ttsMaxBytes: DEFAULT_TTS_CACHE_MAX_BYTES },
       localLlm: DEFAULT_LOCAL_LLM,
+      voiceChat: DEFAULT_VOICE_CHAT,
     });
   });
 

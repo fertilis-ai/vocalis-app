@@ -5,11 +5,11 @@ import {
   startSessionPipeline,
   stopSessionPipeline,
 } from "@/lib/engines/local";
-import type { SessionStatus } from "@/lib/schemas/session";
+import type { SessionStatus, Transcript } from "@/lib/schemas/session";
 import {
+  appendTurns,
   type RawTurn,
   persistTranscript,
-  toTranscript,
 } from "@/lib/sessions/transcript";
 import { deletePath } from "@/lib/storage";
 import { sessionAudioPath, useSessionStore } from "@/stores/session-store";
@@ -22,8 +22,8 @@ import { sessionAudioPath, useSessionStore } from "@/stores/session-store";
 
 export interface SessionRecorder {
   status: SessionStatus;
-  /** In-flight ASR partial (a ghost line), not yet a finalized turn. */
-  partial: string;
+  /** True while a VAD-bounded utterance is being batch-decoded. */
+  transcribingUtterance: boolean;
   /** VAD speaking indicator. */
   speaking: boolean;
   error: string | null;
@@ -36,12 +36,22 @@ export interface SessionRecorder {
 
 export function useSessionRecorder(sessionId: string): SessionRecorder {
   const [status, setStatus] = useState<SessionStatus>("draft");
-  const [partial, setPartial] = useState("");
+  const [transcribingUtterance, setTranscribingUtterance] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [processingMessage, setProcessingMessage] = useState("");
   const pipelineId = useRef<number | null>(null);
   const rawTurns = useRef<RawTurn[]>([]);
+  // The session's already-settled transcript from a prior recording run, when
+  // this start() is resuming a non-draft session rather than starting fresh.
+  // Prepended ahead of rawTurns whenever the transcript is persisted, so a
+  // resumed run extends the transcript instead of replacing it.
+  const priorSettled = useRef<Transcript>([]);
+  // Distinguishes the per-utterance "transcribing" Processing event (fired
+  // while still recording) from the stop-time "refining speakers" Processing
+  // event — both arrive as the same event type, but only the latter should
+  // flip the persisted session status.
+  const stopRequested = useRef(false);
   // Tracks the in-flight "refined" persist so "stopped" can await it before
   // marking the session complete — otherwise the status write can land before
   // the refined transcript write, leaving a "complete" session referencing a
@@ -56,7 +66,7 @@ export function useSessionRecorder(sessionId: string): SessionRecorder {
     async (finalStatus: SessionStatus, patch: Record<string, unknown> = {}) => {
       pipelineId.current = null;
       setSpeaking(false);
-      setPartial("");
+      setTranscribingUtterance(false);
       setStatus(finalStatus);
       await useSessionStore
         .getState()
@@ -68,26 +78,31 @@ export function useSessionRecorder(sessionId: string): SessionRecorder {
   const onEvent = useCallback(
     (event: PipelineEvent) => {
       switch (event.type) {
-        case "partial":
-          setPartial(event.text);
-          break;
         case "vadState":
           setSpeaking(event.speaking);
+          if (event.speaking) setTranscribingUtterance(false);
           break;
         case "speakerTurn":
           rawTurns.current = [...rawTurns.current, event.segment];
-          setPartial("");
-          void persistTranscript(sessionId, toTranscript(rawTurns.current, true));
+          setTranscribingUtterance(false);
+          void persistTranscript(
+            sessionId,
+            appendTurns(priorSettled.current, rawTurns.current, true),
+          );
           break;
         case "processing":
-          setStatus("processing");
-          setProcessingMessage(event.message);
+          if (stopRequested.current) {
+            setStatus("processing");
+            setProcessingMessage(event.message);
+          } else {
+            setTranscribingUtterance(true);
+          }
           break;
         case "refined":
           rawTurns.current = event.segments;
           refinedPersisted.current = persistTranscript(
             sessionId,
-            toTranscript(event.segments, false),
+            appendTurns(priorSettled.current, event.segments, false),
           );
           break;
         case "error":
@@ -95,7 +110,10 @@ export function useSessionRecorder(sessionId: string): SessionRecorder {
           void finish("error", { error: event.message });
           break;
         case "stopped": {
-          const lastEnd = rawTurns.current.at(-1)?.endMs ?? 0;
+          const lastEnd = Math.max(
+            rawTurns.current.at(-1)?.endMs ?? 0,
+            priorSettled.current.at(-1)?.endMs ?? 0,
+          );
           setProcessingMessage("");
           void (async () => {
             await refinedPersisted.current;
@@ -122,14 +140,22 @@ export function useSessionRecorder(sessionId: string): SessionRecorder {
   const start = useCallback(async () => {
     if (pipelineId.current !== null || starting.current) return;
     starting.current = true;
+    stopRequested.current = false;
     setError(null);
-    setPartial("");
+    setTranscribingUtterance(false);
     setProcessingMessage("");
     rawTurns.current = [];
     setStatus("recording");
     const store = useSessionStore.getState();
-    const audioRetained = store.sessions[sessionId]?.audioRetained ?? true;
-    await store.saveTranscript(sessionId, []);
+    const session = await store.loadSession(sessionId);
+    const audioRetained = session?.audioRetained ?? true;
+    // Resuming a session that already recorded into it (status !== "draft")
+    // must extend the existing transcript/audio rather than wipe them.
+    const resuming = (session?.status ?? "draft") !== "draft";
+    priorSettled.current = resuming ? await store.loadTranscript(sessionId) : [];
+    if (!resuming) {
+      await store.saveTranscript(sessionId, []);
+    }
     await store.updateSession(sessionId, {
       mode: "live",
       status: "recording",
@@ -139,6 +165,11 @@ export function useSessionRecorder(sessionId: string): SessionRecorder {
       pipelineId.current = await startSessionPipeline({
         sessionId,
         audioRetained,
+        resumeSegments: priorSettled.current.map((s) => ({
+          speakerLabel: s.speakerLabel,
+          startMs: s.startMs,
+          endMs: s.endMs,
+        })),
         onEvent,
       });
     } catch (err) {
@@ -153,6 +184,7 @@ export function useSessionRecorder(sessionId: string): SessionRecorder {
   const stop = useCallback(async () => {
     const id = pipelineId.current;
     if (id === null) return;
+    stopRequested.current = true;
     setStatus("processing");
     setProcessingMessage("Refining speakers…");
     await stopSessionPipeline(id);
@@ -182,7 +214,7 @@ export function useSessionRecorder(sessionId: string): SessionRecorder {
 
   return {
     status,
-    partial,
+    transcribingUtterance,
     speaking,
     error,
     processingMessage,

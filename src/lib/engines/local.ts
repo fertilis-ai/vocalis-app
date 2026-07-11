@@ -116,6 +116,13 @@ export function enrolledPeopleRefs(): EnrolledPersonRef[] {
     .filter((ref): ref is EnrolledPersonRef => ref !== null);
 }
 
+/** A prior transcript segment's label/span, for resume continuity. */
+export interface ResumeSegmentRef {
+  speakerLabel: string;
+  startMs: number;
+  endMs: number;
+}
+
 export interface SessionPipelineOptions {
   /** The session id — audio is retained under sessions/<id>/audio.wav. */
   sessionId: string;
@@ -128,6 +135,13 @@ export interface SessionPipelineOptions {
   diarizationModel?: string;
   /** Enrolled people to match against; defaults to every enrolled person. */
   enrolled?: EnrolledPersonRef[];
+  /**
+   * Prior transcript segments, when this run is resuming a session that
+   * already has recorded content — seeds speaker-cluster continuity and, if
+   * the prior audio decodes, capture picks up where it left off. Empty for a
+   * fresh session (default).
+   */
+  resumeSegments?: ResumeSegmentRef[];
   onEvent: (event: PipelineEvent) => void;
 }
 
@@ -149,13 +163,14 @@ export async function startSessionPipeline(
     channel,
     sessionId: options.sessionId,
     audioRetained: options.audioRetained ?? true,
-    asrModel: options.asrModel ?? activeModel("asr-streaming"),
+    asrModel: options.asrModel ?? activeModel("asr-batch"),
     vadModel: options.vadModel ?? activeModel("vad"),
     punctuationModel: options.punctuationModel ?? activeModel("punctuation"),
     speakerModel: options.speakerModel ?? activeModel("speaker-embedding"),
     diarizationModel: options.diarizationModel ?? activeModel("diarization"),
     inputDevice: preferredInputDevice(),
     enrolled: options.enrolled ?? enrolledPeopleRefs(),
+    resumeSegments: options.resumeSegments ?? [],
   });
 }
 
@@ -649,7 +664,7 @@ export async function startDictation(
   channel.onmessage = options.onEvent;
   return invoke<number>("dictation_start", {
     channel,
-    asrModel: options.asrModel ?? activeModel("asr-streaming"),
+    asrModel: options.asrModel ?? activeModel("asr-batch"),
     vadModel: options.vadModel ?? activeModel("vad"),
     inputDevice: preferredInputDevice(),
   });
@@ -666,6 +681,62 @@ export async function finalizeDictation(
 export async function cancelDictation(id: number): Promise<void> {
   if (!isDesktop()) return;
   await invoke("dictation_cancel", { id });
+}
+
+export interface ChatCapturePipelineOptions {
+  asrModel?: string;
+  vadModel?: string;
+  /** Silence duration (ms) before a turn endpoints — Voice Chat settings'
+   * VAD silence-threshold slider. Converted to seconds for the Rust side. */
+  vadSilenceMs?: number;
+  onEvent: (event: PipelineEvent) => void;
+}
+
+/**
+ * Start the continuous voice-chat capture pipeline (mic → VAD → batch ASR,
+ * one decode per VAD-bounded utterance). Runs across an entire hands-free
+ * conversation — successive `final` events land as separate turns until
+ * `stopChatCapture`. Only one instance runs at a time (Rust registry rejects
+ * a second).
+ */
+export async function startChatCapture(
+  options: ChatCapturePipelineOptions,
+): Promise<number> {
+  if (!isDesktop()) {
+    throw new Error("Local speech engines require the desktop app");
+  }
+  const channel = new Channel<PipelineEvent>();
+  channel.onmessage = options.onEvent;
+  return invoke<number>("chat_capture_start", {
+    channel,
+    asrModel: options.asrModel ?? activeModel("asr-batch"),
+    vadModel: options.vadModel ?? activeModel("vad"),
+    inputDevice: preferredInputDevice(),
+    minSilence: options.vadSilenceMs !== undefined ? options.vadSilenceMs / 1000 : null,
+  });
+}
+
+export async function stopChatCapture(id: number): Promise<void> {
+  if (!isDesktop()) return;
+  await invoke("chat_capture_stop", { id });
+}
+
+/** Raise (true) or restore (false) the VAD threshold while TTS plays, so the
+ * mic doesn't re-trigger on the assistant's own voice (echo gating v1). */
+export async function setChatCapturePlayback(
+  id: number,
+  active: boolean,
+): Promise<void> {
+  if (!isDesktop()) return;
+  await invoke("chat_capture_set_playback", { id, active });
+}
+
+/** Push-to-talk: force-finalize the in-progress utterance now, without
+ * waiting for a VAD/ASR endpoint. The finalized text (if any) arrives as a
+ * normal `final` event on the pipeline's channel, not as this call's return. */
+export async function forceFinalizeChatCapture(id: number): Promise<void> {
+  if (!isDesktop()) return;
+  await invoke("chat_capture_force_finalize", { id });
 }
 
 export interface InjectionResult {

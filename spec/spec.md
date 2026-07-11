@@ -17,7 +17,7 @@
 - **Local-first, privacy by default** — everything is files under `~/.vocalis/`, API keys live in the macOS keychain, mic audio is ephemeral unless you opt to keep it, and one switch makes the app provably offline.
 - **Hybrid by choice, never by magic** — the app never silently routes audio to a cloud API; the active engine is always visible and overridable in place.
 - **One inference stack** — sherpa-onnx serves all ten local capabilities including voice cloning (ZipVoice); no Python sidecars, no second runtime.
-- **Realtime is the bar** — streaming partial transcripts at ~100 ms cadence, VAD-gated turn-taking, barge-in; batch is the fallback, not the norm.
+- **VAD-gated batch, not streaming partials, is the norm** — chat, live sessions, and dictation buffer each VAD-bounded utterance and run one batch decode on the falling edge, emitting a single `Final` (measured whisper-small-int8 RTF ~0.12 at 2 threads — a typical utterance decodes in well under a second); turn-taking stays VAD-driven, not decode-driven. Streaming ASR (live partial transcripts) survives as a Playground capability demo, not the production path.
 - **Consumer-grade UX in a power-user shell** — Sapio's proven VSCode-style layout: icon bar, per-section sidebar, main view.
 
 ---
@@ -45,21 +45,21 @@
 One section, one sidebar tree (folders, pinning, rename — Sapio's shared sidebar kit), two conversation types distinguished at creation and by icon:
 
 **A. LLM voice chat**
-- Full loop: mic → VAD → streaming local STT (partials rendered live in the input area) → endpoint detection finalizes the turn → LLM streams via `@earendil-works/pi-ai` (Anthropic, OpenAI, Google, OpenRouter, Ollama/LM Studio) → reply is TTS-synthesized sentence-by-sentence and played as it streams.
-- **Turn-taking: hands-free with barge-in.** Conversation mode listens continuously; VAD silence threshold (configurable, default ~800 ms) ends your turn. Speaking while the assistant is talking stops playback within ~150 ms and starts a new turn. Push-to-talk (hold hotkey) available as an alternative input mode per conversation. Echo mitigation v1: VAD gating raises its threshold during playback + "use headphones for conversation mode" onboarding hint; AEC is a v2 item if needed.
+- Full loop: mic → VAD → buffer the utterance while VAD says "speaking" → on the falling edge, one batch local STT decode over the whole utterance ("Transcribing…" shown for the decode window) → LLM streams via `@earendil-works/pi-ai` (Anthropic, OpenAI, Google, OpenRouter, Ollama/LM Studio) → reply is TTS-synthesized sentence-by-sentence and played as it streams.
+- **Turn-taking: hands-free, mic paused during playback.** Conversation mode listens continuously; VAD silence threshold (configurable, default ~800 ms) ends your turn. The mic is paused for the whole span of the assistant's TTS reply and resumes right after — no barge-in; you can only start a new turn once the reply finishes. Push-to-talk (hold hotkey) available as an alternative input mode per conversation, with the same pause. Echo mitigation v1: pause capture during playback + "use headphones for conversation mode" onboarding hint; AEC is a v2 item if needed.
 - Text input always works; every assistant message has a play button (reads in the conversation's voice). Voice picker per conversation (from the TTS voice library, including clones); model picker per conversation (pi-ai model discovery, Sapio's picker UI).
 - Optional transcript-only mode (mute TTS) and auto-title from first exchange.
 
 **B. Transcription sessions**
-- **Live mode**: VAD → streaming ASR → punctuation → online diarization. Rendered as chat-style bubbles per speaker with timestamps. Speakers whose embeddings match enrolled People (§2.4) get real names and colors; unknown speakers get `Speaker 1..N` and can be assigned/enrolled afterwards from the session view.
+- **Live mode**: VAD → batch ASR per utterance → punctuation → online diarization. Rendered as chat-style bubbles per speaker with timestamps. Speakers whose embeddings match enrolled People (§2.4) get real names and colors; unknown speakers get `Speaker 1..N` and can be assigned/enrolled afterwards from the session view.
 - **File import**: drop an audio file (wav/mp3/m4a/flac) into a session; same pipeline runs offline with engine choice — local Whisper for quality, Groq for speed, Deepgram for API diarization. Import runs show progress and are cancelable.
 - Session view: transcript with inline audio scrubber (waveform, click-to-seek, per-bubble playback), speaker rename/merge, edit text.
 - **Export**: markdown (speaker-labeled), SRT, JSON (full timing + speaker + confidence).
 - Session audio is retained (FLAC) by default; a per-session toggle discards it on close.
 
-### 2.3 Playground — ten tool pages on one audio bench
+### 2.3 Playground — eleven tool pages on one audio bench
 
-Sidebar lists the ten capabilities; each page is thin, assembled from the shared **audio bench** kit:
+Sidebar lists the eleven capabilities; each page is thin, assembled from the shared **audio bench** kit:
 
 - **Input source panel**: mic (with live waveform + level meter), file drop, or pick from the recording library (saved session/playground audio).
 - **Engine picker**: local models installed for this task + applicable API engines; disabled entries show why (not downloaded / privacy mode / no key).
@@ -70,7 +70,8 @@ Per-capability pages:
 
 | Page | Input | Output / UX |
 |---|---|---|
-| Speech recognition | mic (streaming) or file | live partial/final transcript, word timestamps, RTF + latency stats, side-by-side engine compare (run same audio through 2 engines) |
+| Speech recognition | file | batch transcript, word timestamps, RTF + latency stats, side-by-side engine compare (run same audio through 2 engines) |
+| Streaming Recognition | mic (streaming) | live partial/final transcript, word timestamps — the production chat/live/dictation pipelines no longer use this decode mode; it's kept here as a capability demo |
 | Speech synthesis | text | voice picker (full library incl. clones), speed/pitch params, waveform of result, save-to-library, A/B two voices |
 | Voice activity detection | mic or file | live speech/silence timeline strip, threshold/min-duration params, segment list with per-segment playback |
 | Speaker identification | mic or file | ranked matches against enrolled People with cosine scores |
@@ -107,15 +108,15 @@ Two tabs in one section.
 
 ### 2.6 System-wide dictation (menubar + global hotkey)
 
-- **Global push-to-talk**: hold the hotkey (default `⌥Space`, configurable; toggle mode also available) → compact floating HUD appears (waveform, live partial transcript, engine chip, polish toggle) → release → finalize → text is injected into the frontmost app via clipboard-swap + synthesized ⌘V (previous clipboard restored). Works with the main window closed; the app runs as a menubar item (tray) with quick toggles (privacy mode, polish, open window).
-- **Pipeline**: mic → VAD → streaming Zipformer ASR (local, always — dictation never uses APIs for audio) → CT-transformer punctuation → optional **LLM polish** pass: filler removal, self-correction application ("3pm no wait 4pm" → "4pm"), light formatting, via a fast model (default: cheapest configured provider model or local Ollama). Polish toggle lives in the HUD, remembers its state, is forced off in privacy mode unless the polish model is local; latency budget ≤1 s.
-- Raw-vs-polished: HUD shows raw text streaming; polish (when on) replaces at finalize. `Esc` cancels without pasting.
+- **Global push-to-talk**: hold the hotkey (default `⌥Space`, configurable; toggle mode also available) → compact floating HUD appears (waveform, transcript-so-far, engine chip, polish toggle) → release → finalize → text is injected into the frontmost app via clipboard-swap + synthesized ⌘V (previous clipboard restored). Works with the main window closed; the app runs as a menubar item (tray) with quick toggles (privacy mode, polish, open window).
+- **Pipeline**: mic → VAD → batch local ASR per utterance (one decode per VAD-bounded utterance, on the falling edge; local, always — dictation never uses APIs for audio) → CT-transformer punctuation → optional **LLM polish** pass: filler removal, self-correction application ("3pm no wait 4pm" → "4pm"), light formatting, via a fast model (default: cheapest configured provider model or local Ollama). Polish toggle lives in the HUD, remembers its state, is forced off in privacy mode unless the polish model is local; latency budget ≤1 s per utterance decode.
+- Raw-vs-polished: HUD shows raw text accumulating per finished utterance (each VAD falling edge appends its decode, with a brief "transcribing…" status while a decode is in flight); polish (when on) replaces at finalize. `Esc` cancels without pasting.
 - **Permissions**: microphone (Info.plist) + accessibility (for ⌘V injection) requested with a first-run explainer; dictation degrades to "copied to clipboard" + notification if accessibility is denied.
 - Dictation audio is never persisted; transcript history (last 50 dictations, text only) viewable in Settings → Dictation, opt-out.
 
 ### 2.7 Settings
 
-Sectioned view (Sapio pattern): **Appearance** (theme, hue presets), **API Keys** (→ keychain; per-provider status), **Engines & Routing** (the per-task default matrix, §3.4, incl. privacy mode), **Models** (link to Models section + storage meter + cache cap), **Dictation** (hotkey, mode, polish model, history), **Voice Chat** (VAD thresholds, barge-in on/off, default voice/model), **LLM Models** (pi-ai provider model picker), **Audio** (input/output device selection, sample-rate display), **Advanced/Debug** (logging toggles).
+Sectioned view (Sapio pattern): **Appearance** (theme, hue presets), **API Keys** (→ keychain; per-provider status), **Engines & Routing** (the per-task default matrix, §3.4, incl. privacy mode), **Models** (link to Models section + storage meter + cache cap), **Dictation** (hotkey, mode, polish model, history), **Voice Chat** (VAD thresholds, barge-in [disabled — superseded by playback-pause], default voice/model), **LLM Models** (pi-ai provider model picker), **Audio** (input/output device selection, sample-rate display), **Advanced/Debug** (logging toggles).
 
 ### 2.8 Debug pane
 
@@ -176,19 +177,27 @@ Bun + Vite 6 + Tailwind v4 + shadcn/ui + Biome (lint only) + Vitest. Rust: `sher
 mic ──cpal (48k)──▶ resample 16k mono ──▶ ring buffer
   └▶ PipelineActor (tokio task per active pipeline)
        ├─ VAD (silero) — gate + endpointing        ~30ms frames
-       ├─ streaming ASR (Zipformer transducer)     partials every ~100ms
-       ├─ on endpoint: punctuation → final segment
+       ├─ buffer raw audio while VAD says "speaking"
+       ├─ on the falling edge: one batch ASR decode (Whisper, offline)
+       │    over the whole buffered utterance → punctuation → final segment
        ├─ (live session) embedding + online clustering → speaker label
        └─ emits PipelineEvent over a Tauri Channel:
-            Partial{text} | Final{segment} | VadState{...} |
+            Processing{message} | Final{segment} | VadState{...} |
             SpeakerTurn{...} | Metrics{...} | Error{...}
-webview: stores subscribe to the channel → UI renders partials live
+webview: stores subscribe to the channel → UI shows "Transcribing…" during
+  the decode, then the full utterance text appears at once on Final
   └─ (voice chat) final turn → pi-ai LLM stream → sentence chunker
        → tts_synthesize per sentence (local or API) → playback queue
-       → barge-in: VAD speech-start event → cancel playback + LLM stream
+       → playback active/inactive reported to Rust → mic capture paused
+         for the span of playback, resumes on drain (no barge-in)
 ```
 
-Rules: raw audio never crosses the IPC boundary during realtime capture (it stays in Rust; the webview receives events only). File-based runs pass paths, not bytes. TTS audio returns as file path (cache) and is played by the webview audio queue; the playback state is reported to Rust (command) so VAD can gate against echo.
+`Partial{text}` events (incremental streaming-ASR partials) are emitted only
+by the Streaming Recognition Playground page (§2.3); chat, live sessions, and
+dictation never see them — each VAD-bounded utterance produces exactly one
+`Final`.
+
+Rules: raw audio never crosses the IPC boundary during realtime capture (it stays in Rust; the webview receives events only). File-based runs pass paths, not bytes. TTS audio returns as file path (cache) and is played by the webview audio queue; the playback state is reported to Rust (command) so capture can pause against echo.
 
 ### 3.3 Rust engine layer
 
@@ -204,8 +213,8 @@ Rules: raw audio never crosses the IPC boundary during realtime capture (it stay
 
 | Task | v1 default | Alternatives |
 |---|---|---|
-| Streaming ASR (dictation/live/chat) | local zipformer-en (FR: Deepgram until local FR streaming lands) | Deepgram |
-| Batch ASR (imports) | local whisper-small-int8 | Groq whisper-large-v3, OpenAI, ElevenLabs Scribe |
+| Streaming ASR (Playground demo only) | local zipformer-en (FR: Deepgram until local FR streaming lands) | Deepgram |
+| Batch ASR (dictation/live/chat, imports) | local whisper-small-int8 (measured RTF ~0.12 at 2 threads — sub-second per-utterance decode) | Groq whisper-large-v3, OpenAI, ElevenLabs Scribe |
 | TTS (chat/read-aloud) | local kokoro | ElevenLabs, OpenAI |
 | Cloned-voice TTS | local zipvoice | ElevenLabs clone |
 | Diarization | local (pyannote seg + embeddings) | Deepgram (on API imports) |
@@ -263,9 +272,9 @@ Conventions: **JSON for all machine state** (one schema per file type, all Zod-v
 
 | Task | Model (catalog id) | Notes |
 |---|---|---|
-| Streaming ASR (EN) | `zipformer-streaming-en` (sherpa-onnx streaming Zipformer transducer, int8) | dictation/live default; keep-warm |
-| Batch ASR (multi, EN/FR) | `whisper-small-int8`; optional `whisper-medium-int8` | FR local batch quality |
-| Batch ASR (EN fast) | `parakeet-tdt-0.6b` or `moonshine-base` | fast English imports |
+| Streaming ASR (EN) | `zipformer-streaming-en` (sherpa-onnx streaming Zipformer transducer, int8) | Streaming Recognition Playground demo only |
+| Batch ASR (multi, EN/FR) | `whisper-small-int8`; optional `whisper-medium-int8` | dictation/live/chat/imports default; keep-warm; FR local batch quality |
+| Batch ASR (fast, multi) | `parakeet-tdt-0.6b-v3-int8` (NeMo transducer, 25 languages incl. EN/FR) or `moonshine-base` | fast imports |
 | VAD | `silero-vad-v5` | resident; all pipelines |
 | Speaker embedding | 3D-Speaker `eres2netv2` (or WeSpeaker CAM++ VoxCeleb) | ID/verify/diarization; EN/FR robust (trained multilingual/VoxCeleb) |
 | Diarization segmentation | `pyannote-segmentation-3.0` (ONNX) | offline diarization pipeline |
@@ -310,9 +319,9 @@ From the source exploration of `~/dev/fertilis/sapio-app` (`apps/web/` unless no
 1. **ZipVoice quality/latency** — verified supported in sherpa-onnx core (zero-shot cloning from short reference audio) but **batch-only, not streaming**: cloned-voice chat depends on sentence-chunked synthesis being fast enough (target: time-to-first-audio < 1.5 s on M-series). **Mitigation: M0-parallel spike** (CLI-level test before any UI). Fallback: F5-TTS ONNX behind the same `Tts` trait; worst case, cloned voices are ElevenLabs-only while local matures.
 2. **Rust binding coverage** — the official `sherpa-onnx` crate is newest; verify each of the ten APIs (esp. ZipVoice, source separation, online punctuation) is exposed; drop to the C API via FFI for gaps rather than switching stacks.
 3. **Online diarization** is genuinely hard (incremental clustering instability). Mitigation: live labels are provisional (UI marks them subtly); a refinement pass on session stop re-clusters and cleans labels. Fallback if live quality disappoints: live shows VAD-segmented turns with speaker-ID-only naming (enrolled people), full diarization as the stop-time pass.
-4. **Echo/barge-in without AEC** — speaker output re-triggering VAD. V1: playback-aware VAD gating + headphone guidance; if insufficient, add an AEC stage (e.g. speex/webrtc-audio-processing crate) in the capture path.
+4. **Echo without AEC** — speaker output re-triggering VAD. V1: pause capture during playback + headphone guidance (no barge-in — capture just resumes once playback drains); if insufficient, add an AEC stage (e.g. speex/webrtc-audio-processing crate) in the capture path.
 5. **macOS text injection** — accessibility permission friction + ⌘V quirks in some apps (terminals, secure fields). Degrade to clipboard+notification; keep the previous clipboard restore robust (restore on a short delay after paste event).
-6. **French local coverage** — no FR streaming Zipformer, no FR local punctuation. Honest v1: FR live/dictation via Deepgram (or batch-style local with higher latency), documented in the routing matrix defaults.
+6. **French local coverage** — no FR local punctuation (batch ASR itself, now the default for live/dictation/chat, is multilingual `whisper-small-int8` and covers FR directly). Honest v1: FR punctuation relies on Whisper's inline punctuation or LLM polish (dictation); no FR streaming Zipformer either, but that only affects the Streaming Recognition Playground demo, not production.
 7. **Concurrent model memory** — live session runs VAD+ASR+embedder simultaneously; with ZipVoice warm this can exceed comfortable RAM on 8 GB machines. EngineManager LRU + pipeline inspector memory view exist for this; catalog favors int8 quantizations.
 8. **Sapio-inherited build gotchas** (inspiration.md §8) — Node-builtin webview stubs, thenable-Proxy Vitest hangs, timer cleanup in dispose, MediaRecorder `onstop` awaiting (still relevant for enrollment recording in the webview), ElevenLabs/OpenAI API quirks (omit empty params; raw-bytes TTS responses).
 
@@ -335,7 +344,7 @@ Audio bench kit finalized; all ten tool pages functional with local engines; API
 Chat section shell + session conversation type; live pipeline with provisional diarization + stop-time refinement; People enrollment + speaker naming; file import with engine choice; exports (md/SRT/JSON); session audio retention controls. *Exit: a real meeting transcribed live with correct names, exported.*
 
 **M4 — LLM voice chat** — plan: [M4.md](M4.md)
-Full pi-ai layer (providers, model picker, streaming); voice conversation mode with VAD turn-taking + barge-in; sentence-chunked TTS queue; read-aloud on all messages; conversation voice picker. *Exit: a hands-free multi-turn conversation with interruptions that feels natural.*
+Full pi-ai layer (providers, model picker, streaming); voice conversation mode with VAD turn-taking and the mic paused during TTS playback (no barge-in); sentence-chunked TTS queue; read-aloud on all messages; conversation voice picker. *Exit: a hands-free multi-turn conversation that feels natural, with no echo of the assistant's own voice.*
 
 **M5 — Voice cloning** — plan: [M5.md](M5.md)
 People clone flow (guided recording, consent); ZipVoice local synthesis wired as a TTS engine; ElevenLabs clone creation + listing; clone voices in every picker; latency tuning (chunking, warm-up). *Exit: your cloned voice answers you in chat, fully locally.*

@@ -4,6 +4,7 @@ import {
   Fingerprint,
   Globe,
   Mic,
+  Radio,
   ScanSearch,
   SplitSquareHorizontal,
   Type,
@@ -11,13 +12,21 @@ import {
   Users,
 } from "lucide-react";
 
-// The ten sherpa-onnx capabilities — spec/spec.md §2.3. Pages come online per
-// milestone; `available: false` renders the ComingSoon panel.
+// The ten sherpa-onnx capabilities plus the Streaming Recognition demo page
+// (spec/spec.md §2.3) — spec §0 moved chat/sessions/dictation to batch ASR,
+// so streaming decode now only lives here. Pages come online per milestone;
+// `available: false` renders the ComingSoon panel.
 export const PLAYGROUND_TOOLS = [
   {
     id: "asr",
     label: "Speech recognition",
     icon: Mic,
+    available: true,
+  },
+  {
+    id: "asr-streaming",
+    label: "Streaming Recognition",
+    icon: Radio,
     available: true,
   },
   {

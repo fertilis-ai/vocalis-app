@@ -5,6 +5,7 @@ import {
   DEFAULT_LOCAL_LLM,
   DEFAULT_ROUTING,
   DEFAULT_TTS_CACHE_MAX_BYTES,
+  DEFAULT_VOICE_CHAT,
 } from "@/lib/schemas/config";
 
 // Mock storage
@@ -31,6 +32,7 @@ const mockSetActiveByTask = vi.fn();
 const mockSetAudioInputDevice = vi.fn();
 const mockSetTtsCacheMaxBytes = vi.fn();
 const mockSetLocalLLM = vi.fn();
+const mockSetVoiceChat = vi.fn();
 const mockLoadApiKeysFromKeychain = vi.fn();
 
 const defaultStoreState = {
@@ -42,6 +44,7 @@ const defaultStoreState = {
   audioInputDevice: "",
   ttsCacheMaxBytes: DEFAULT_TTS_CACHE_MAX_BYTES,
   localLLM: { ...DEFAULT_LOCAL_LLM },
+  voiceChat: { ...DEFAULT_VOICE_CHAT },
   setHue: mockSetHue,
   setPrivacyMode: mockSetPrivacyMode,
   setRouting: mockSetRouting,
@@ -50,6 +53,7 @@ const defaultStoreState = {
   setAudioInputDevice: mockSetAudioInputDevice,
   setTtsCacheMaxBytes: mockSetTtsCacheMaxBytes,
   setLocalLLM: mockSetLocalLLM,
+  setVoiceChat: mockSetVoiceChat,
   loadApiKeysFromKeychain: mockLoadApiKeysFromKeychain,
 };
 
@@ -186,6 +190,7 @@ describe("config-sync", () => {
       expect(parsed.cache.ttsMaxBytes).toBe(DEFAULT_TTS_CACHE_MAX_BYTES);
       expect(parsed.audio.inputDevice).toBe("");
       expect(parsed.localLlm).toEqual(DEFAULT_LOCAL_LLM);
+      expect(parsed.voiceChat).toEqual(DEFAULT_VOICE_CHAT);
     });
   });
 

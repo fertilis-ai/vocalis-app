@@ -19,7 +19,8 @@ import type { Conversation } from "@/lib/schemas/chat";
 // web-only-mode branches: build a plain pi-ai `Model` object per provider
 // (cloud or local) and stream against the matching `api/*` module directly —
 // no tool-calling, no adapter, no Models registry. Privacy mode is enforced
-// once, here, mirroring dictation-polish.ts.
+// once, here: unlike dictation-polish.ts (API-only, always skipped under
+// privacy mode), chat has a local option, so only cloud providers are barred.
 
 export interface LocalLlmSettings {
   provider: LocalProvider;
@@ -152,12 +153,12 @@ export interface StreamChatParams {
 
 /** Streams assistant text deltas for one turn. Throws on privacy mode, missing config, or a provider error. */
 export async function* streamChat(params: StreamChatParams): AsyncGenerator<string, void, void> {
-  if (params.privacyMode) {
-    throw new Error("Voice chat is disabled in privacy mode.");
-  }
   const ref = params.conversation.modelRef ? parseModelRef(params.conversation.modelRef) : null;
   if (!ref) {
     throw new Error("No model selected for this conversation.");
+  }
+  if (params.privacyMode && !isLocalProvider(ref.provider)) {
+    throw new Error("Only local models (Ollama/LM Studio) are available in privacy mode.");
   }
 
   const { model, apiKey } = await resolveModel({

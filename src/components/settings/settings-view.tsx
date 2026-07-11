@@ -6,6 +6,7 @@ import { ChatSettings } from "./chat-settings";
 import { DictationSettings } from "./dictation-settings";
 import { ModelsSettings } from "./models-settings";
 import { RoutingSettings } from "./routing-settings";
+import { VoiceChatSettings } from "./voice-chat-settings";
 
 // Section order mirrors SETTINGS_SECTIONS (sections.ts) so sidebar jumps
 // land where the reader expects.
@@ -22,6 +23,7 @@ export function SettingsView() {
           <RoutingSettings />
           <ModelsSettings />
           <ChatSettings />
+          <VoiceChatSettings />
           <DictationSettings />
           <AudioSettings />
           <AdvancedSettings />

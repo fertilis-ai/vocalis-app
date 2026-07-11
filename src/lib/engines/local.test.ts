@@ -84,7 +84,7 @@ describe("local engine bridge model resolution", () => {
   it("uses the channel bridge for dictation and active punctuation model", async () => {
     useSettingsStore.setState({
       activeByTask: {
-        "asr-streaming": "zipformer-en",
+        "asr-batch": "whisper-small-int8",
         vad: "silero-vad-v5",
         punctuation: "ct-transformer-zh-en",
       },
@@ -93,7 +93,7 @@ describe("local engine bridge model resolution", () => {
     await startDictation({ onEvent: () => {} });
     expect(mockInvoke).toHaveBeenCalledWith(
       "dictation_start",
-      expect.objectContaining({ asrModel: "zipformer-en", vadModel: "silero-vad-v5" }),
+      expect.objectContaining({ asrModel: "whisper-small-int8", vadModel: "silero-vad-v5" }),
     );
 
     mockInvoke.mockResolvedValueOnce("Punctuated text.");
