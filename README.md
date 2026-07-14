@@ -1,6 +1,8 @@
 # Vocalis
 
-A local-first, realtime speech app for macOS — speech-to-text, text-to-speech, and voice cloning, powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) running in-process in Rust. Built on Tauri v2 + Rust + React 19.
+A local-first, realtime speech app for macOS — speech-to-text, text-to-speech, and voice cloning, powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) running in-process in Rust.
+
+![Vocalis screenshot](assets/vocalis_screenshot.png)
 
 Vocalis is three things at once:
 
