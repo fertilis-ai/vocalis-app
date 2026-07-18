@@ -3,6 +3,7 @@ import { ChatComposer } from "@/components/chat/chat-composer";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { EngineChip } from "@/components/shared/engine-chip";
 import { useVoiceChat } from "@/lib/audio/use-voice-chat";
+import { cloneTtsWarm } from "@/lib/engines/local";
 import { useChatStream } from "@/lib/llm/use-chat-stream";
 import { useMessagePlayback } from "@/lib/llm/use-message-playback";
 import { useChatStore } from "@/stores/chat-store";
@@ -38,6 +39,17 @@ export function ChatView({ conversationId }: ChatViewProps) {
     send,
     stopStream: stop,
   });
+
+  // Warm ZipVoice when the conversation speaks in a local clone voice (M5
+  // item 4): the ~0.5 s engine load happens on open instead of on the first
+  // sentence, keeping time-to-first-audio under the 1.5 s target. Failures
+  // are ignored — synthesis will surface the real error if it comes to that.
+  const voiceId = conversation?.voiceId;
+  React.useEffect(() => {
+    if (voiceId?.startsWith("clone:zipvoice:")) {
+      cloneTtsWarm().catch(() => {});
+    }
+  }, [voiceId]);
 
   const messageCount = conversation?.messages.length ?? 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: messageCount/pendingReply are re-run triggers for scroll-to-bottom, not values read by the effect

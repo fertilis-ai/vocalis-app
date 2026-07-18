@@ -4,17 +4,26 @@ import { Button } from "@/components/ui/button";
 import { getUniqueName } from "@/lib/tree-utils";
 import { cn } from "@/lib/utils";
 import { usePeopleStore } from "@/stores/people-store";
+import { useVoicesStore, type VoicesView } from "@/stores/voices-store";
 
-// Sidebar for the Voices section, People tab (spec §2.4): the enrolled-people
-// list with a color dot, avatar initial, and enrollment badge. Selecting a
-// person opens their profile + guided enrollment in the main pane.
+// Sidebar for the Voices section (spec §2.4, two tabs): People — the
+// enrolled-people list with color dot, avatar initial, enrollment badge —
+// and the TTS voice library (M5 item 4). Selecting a person opens their
+// profile + guided flows in the main pane.
 
 function initial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
 
+const TABS: { id: VoicesView; label: string }[] = [
+  { id: "people", label: "People" },
+  { id: "library", label: "Voices" },
+];
+
 export function VoicesSidebar() {
   const store = usePeopleStore();
+  const view = useVoicesStore((s) => s.view);
+  const setView = useVoicesStore((s) => s.setView);
 
   React.useEffect(() => {
     void store.loadAll();
@@ -35,23 +44,48 @@ export function VoicesSidebar() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          People
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="h-6 w-6"
-          onClick={() => void addPerson()}
-          aria-label="Add person"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
+      <div className="flex items-center gap-1 px-2 pt-2">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setView(tab.id)}
+            className={cn(
+              "flex-1 rounded-md px-2 py-1 font-medium text-xs transition-colors",
+              view === tab.id
+                ? "bg-secondary text-foreground"
+                : "text-muted-foreground hover:bg-accent",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-2">
-        {people.length === 0 ? (
+      {view === "library" ? (
+        <p className="px-3 py-4 text-muted-foreground text-xs">
+          Stock, cloud, and cloned voices — with previews, favorites, and
+          per-voice speed.
+        </p>
+      ) : (
+        <>
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+              People
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="h-6 w-6"
+              onClick={() => void addPerson()}
+              aria-label="Add person"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto pb-2">
+            {people.length === 0 ? (
           <div className="px-3 py-4 text-muted-foreground text-xs">
             <p className="mb-2">No people yet.</p>
             <Button variant="outline" size="sm" onClick={() => void addPerson()}>
@@ -84,9 +118,11 @@ export function VoicesSidebar() {
                 aria-label={person.enrollment ? "Enrolled" : "Not enrolled"}
               />
             </button>
-          ))
-        )}
-      </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

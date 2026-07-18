@@ -159,6 +159,48 @@ fn kokoro_synthesizes_audio() {
 
 #[test]
 #[ignore]
+fn zipvoice_clones_from_reference() {
+    use std::time::Instant;
+    use vocalis_lib::engines::{CloneTtsEngine, CLONE_TTS_DEFAULT_STEPS};
+
+    let dir = registry::first_installed("clone-tts")
+        .unwrap()
+        .expect("no clone-tts model installed");
+    // The model ships zh reference fixtures with exact transcripts; the
+    // engine is zh/en so an English synth from a zh reference is in-domain.
+    let (ref_samples, ref_rate) = wav_samples(&dir.join("test_wavs/news-female.wav"));
+    let ref_text = "各位村民, 大家新年好! 近期, 湖北省武汉市等多个地区";
+
+    let load_started = Instant::now();
+    let engine = CloneTtsEngine::new(&dir, 8).unwrap();
+    let load_secs = load_started.elapsed().as_secs_f64();
+
+    let out = std::env::temp_dir().join("vocalis-test-clone-tts.wav");
+    let started = Instant::now();
+    let duration = engine
+        .synthesize_to_wav(
+            "The quick brown fox jumps over the lazy dog.",
+            &ref_samples,
+            ref_rate,
+            ref_text,
+            1.0,
+            CLONE_TTS_DEFAULT_STEPS,
+            &out,
+        )
+        .unwrap();
+    let synth_secs = started.elapsed().as_secs_f64();
+    // TTFA log per M5 item 2 (spike baseline: ~0.8 s short sentence, 8 threads).
+    println!(
+        "zipvoice: load {load_secs:.2}s, {duration:.2}s audio in {synth_secs:.2}s (rtf {:.2})",
+        synth_secs / duration.max(0.001)
+    );
+    assert!(duration > 1.0, "expected >1s of audio, got {duration}");
+    assert!(out.exists());
+    std::fs::remove_file(out).ok();
+}
+
+#[test]
+#[ignore]
 fn speaker_embedding_verifies_same_voice_on_test_wav() {
     let embed_dir = registry::first_installed("speaker-embedding")
         .unwrap()

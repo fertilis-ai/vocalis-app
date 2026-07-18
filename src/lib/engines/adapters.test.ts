@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { deepgramDiarize, deepgramTranscribe, mergeWordsBySpeaker } from "./deepgram";
-import { elevenlabsSynthesize, elevenlabsTranscribe } from "./elevenlabs";
+import {
+  elevenlabsCreateClone,
+  elevenlabsDeleteVoice,
+  elevenlabsListVoices,
+  elevenlabsSynthesize,
+  elevenlabsTranscribe,
+} from "./elevenlabs";
 import { groqTranscribe } from "./groq";
 import { openaiSynthesize, openaiTranscribe } from "./openai";
 
@@ -174,6 +180,69 @@ describe("elevenlabsSynthesize", () => {
       "https://api.elevenlabs.io/v1/text-to-speech/voice123",
     );
     expect(audio.ext).toBe("mp3");
+  });
+});
+
+describe("elevenlabsCreateClone", () => {
+  it("posts multipart to /voices/add and returns the voice id", async () => {
+    const fetch = mockFetch(() => jsonResponse({ voice_id: "clone-42" }));
+    const voiceId = await elevenlabsCreateClone({
+      fetch: asFetch(fetch),
+      apiKey: "xi",
+      name: "Martin (clone)",
+      bytes: AUDIO,
+      filename: "clip-0.wav",
+    });
+    expect(voiceId).toBe("clone-42");
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("https://api.elevenlabs.io/v1/voices/add");
+    expect(init.headers).toMatchObject({ "xi-api-key": "xi" });
+    const form = init.body as FormData;
+    expect(form.get("name")).toBe("Martin (clone)");
+    expect(form.get("files")).toBeInstanceOf(Blob);
+    // Empty optionals are omitted entirely (inspiration.md §8).
+    expect(form.has("description")).toBe(false);
+  });
+
+  it("throws when the response carries no voice_id", async () => {
+    const fetch = mockFetch(() => jsonResponse({}));
+    await expect(
+      elevenlabsCreateClone({
+        fetch: asFetch(fetch),
+        apiKey: "xi",
+        name: "x",
+        bytes: AUDIO,
+        filename: "a.wav",
+      }),
+    ).rejects.toThrow(/voice_id/);
+  });
+});
+
+describe("elevenlabsListVoices", () => {
+  it("maps voice_id/name/category", async () => {
+    const fetch = mockFetch(() =>
+      jsonResponse({
+        voices: [
+          { voice_id: "v1", name: "Rachel", category: "premade" },
+          { voice_id: "v2", name: "Martin (clone)", category: "cloned" },
+        ],
+      }),
+    );
+    const voices = await elevenlabsListVoices({ fetch: asFetch(fetch), apiKey: "xi" });
+    expect(voices).toEqual([
+      { voiceId: "v1", name: "Rachel", category: "premade" },
+      { voiceId: "v2", name: "Martin (clone)", category: "cloned" },
+    ]);
+  });
+});
+
+describe("elevenlabsDeleteVoice", () => {
+  it("DELETEs the voice endpoint", async () => {
+    const fetch = mockFetch(() => jsonResponse({ status: "ok" }));
+    await elevenlabsDeleteVoice({ fetch: asFetch(fetch), apiKey: "xi", voiceId: "v2" });
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("https://api.elevenlabs.io/v1/voices/v2");
+    expect(init.method).toBe("DELETE");
   });
 });
 

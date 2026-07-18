@@ -201,13 +201,37 @@ export const ENGINE_DESCRIPTORS: EngineDescriptor[] = [
 
   // Cloned-voice TTS
   {
+    // zh/en only — no French (spec §7.1); FR clones are ElevenLabs-only.
     id: "local.zipvoice",
     task: "cloneTts",
     kind: "local",
     modelTask: "clone-tts",
     label: "ZipVoice (local)",
-    langs: ["en"],
-    implemented: false,
+    langs: ["en", "zh"],
+    implemented: true,
+    params: [
+      {
+        key: "speed",
+        label: "Speed",
+        type: "number",
+        min: 0.5,
+        max: 2,
+        step: 0.1,
+        default: 1,
+        unit: "×",
+      },
+      {
+        // Flow-matching sampling steps: more = better quality, linearly
+        // slower. 4 is the spike's A/B pick (spike-zipvoice.md).
+        key: "numSteps",
+        label: "Sampling steps",
+        type: "number",
+        min: 2,
+        max: 16,
+        step: 1,
+        default: 4,
+      },
+    ],
   },
   {
     id: "elevenlabs.clone",
@@ -216,7 +240,7 @@ export const ENGINE_DESCRIPTORS: EngineDescriptor[] = [
     provider: "elevenlabs",
     label: "ElevenLabs clone",
     langs: ["en", "fr"],
-    implemented: false,
+    implemented: true,
   },
 
   // Diarization

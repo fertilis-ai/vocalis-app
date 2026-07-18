@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::State;
 
-use crate::commands::speech::{read_wav_16k, resolve_model_dir};
+use crate::commands::speech::{read_wav_16k, resolve_model_dir, resolve_vad_path};
 use crate::commands::{app_data_dir, expand_tilde};
-use crate::engines::SpeakerEmbedder;
+use crate::audio::TARGET_SAMPLE_RATE;
+use crate::engines::{detect_speech_spans, SpeakerEmbedder, VadParams};
 use crate::pipeline::{start_recorder, EnrolledSpeaker, RecorderEvent};
 use crate::registry::download::validate_path_component;
 use crate::state::SpeechState;
@@ -43,6 +44,93 @@ pub fn enroll_record_start(
     let id = start_recorder(&state.recorders, out_path, input_device, channel);
     log::info!("[people] started enrollment recorder {id} for {person_id} slot {slot}");
     Ok(id)
+}
+
+/// Start recording a clone reference clip into
+/// people/<id>/clone-ref/clip-<slot>.wav (M5 item 1). Same recorder as
+/// enrollment: stop via `record_stop`, cancel via `record_cancel`, saved path
+/// arrives as `RecorderEvent::Saved`. WAV rather than FLAC, matching the
+/// enrollment flow's sanctioned fallback.
+#[tauri::command]
+pub fn clone_ref_record_start(
+    state: State<'_, SpeechState>,
+    channel: Channel<RecorderEvent>,
+    person_id: String,
+    slot: u32,
+    input_device: Option<String>,
+) -> Result<u32, String> {
+    let out_path = person_dir(&person_id)?
+        .join("clone-ref")
+        .join(format!("clip-{slot}.wav"));
+    let id = start_recorder(&state.recorders, out_path, input_device, channel);
+    log::info!("[people] started clone-ref recorder {id} for {person_id} slot {slot}");
+    Ok(id)
+}
+
+/// Raw quality measurements for a clone reference take (M5 item 1). Rust
+/// measures, the webview judges: pass/fail thresholds (clipping, level floor,
+/// noise ceiling) live in TS where they're unit-testable and shown per take.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipQuality {
+    pub duration_secs: f64,
+    /// Absolute sample peak over the whole clip (clipping when ≥ ~0.99).
+    pub peak: f32,
+    /// RMS over the whole clip.
+    pub rms: f32,
+    /// RMS inside VAD speech spans (the signal level).
+    pub speech_rms: f32,
+    /// RMS outside VAD speech spans (the noise floor). 0 when no silence.
+    pub noise_rms: f32,
+    /// Total speech time found by the VAD.
+    pub speech_secs: f64,
+}
+
+/// Analyze a recorded clone-ref take: overall peak/rms plus Silero-VAD-split
+/// speech level vs. silence noise floor.
+#[tauri::command]
+pub fn clone_ref_quality(path: String, vad_model: Option<String>) -> Result<ClipQuality, String> {
+    let samples = read_wav_16k(&path)?;
+    if samples.is_empty() {
+        return Err(format!("no audio in {path}"));
+    }
+    let duration_secs = samples.len() as f64 / TARGET_SAMPLE_RATE as f64;
+    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    let rms = rms_of(&samples);
+
+    let vad_path = resolve_vad_path(vad_model)?;
+    let spans = detect_speech_spans(&vad_path, &samples, VadParams::default())?;
+    let mut speech: Vec<f32> = Vec::new();
+    let mut silence: Vec<f32> = Vec::new();
+    let mut cursor = 0usize;
+    for span in &spans {
+        let start = (span.start as f64 * TARGET_SAMPLE_RATE as f64) as usize;
+        let end = ((span.end as f64 * TARGET_SAMPLE_RATE as f64) as usize).min(samples.len());
+        silence.extend_from_slice(&samples[cursor.min(start)..start]);
+        speech.extend_from_slice(&samples[start.min(end)..end]);
+        cursor = end;
+    }
+    silence.extend_from_slice(&samples[cursor.min(samples.len())..]);
+
+    let speech_secs = speech.len() as f64 / TARGET_SAMPLE_RATE as f64;
+    log::info!(
+        "[people] clone-ref quality {path}: peak {peak:.3} rms {rms:.4} speech {speech_secs:.1}s"
+    );
+    Ok(ClipQuality {
+        duration_secs,
+        peak,
+        rms,
+        speech_rms: rms_of(&speech),
+        noise_rms: rms_of(&silence),
+        speech_secs,
+    })
+}
+
+fn rms_of(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
 }
 
 #[derive(Serialize)]

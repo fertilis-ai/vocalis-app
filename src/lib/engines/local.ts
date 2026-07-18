@@ -617,6 +617,50 @@ export async function startEnrollmentRecording(
   });
 }
 
+/**
+ * Record a clone reference clip for a Person into
+ * people/<id>/clone-ref/clip-<slot>.wav (M5). Same recorder contract as
+ * enrollment: stop with `stopRecording`, cancel with `cancelRecording`.
+ */
+export async function startCloneRefRecording(
+  personId: string,
+  slot: number,
+  onEvent: (event: RecorderEvent) => void,
+): Promise<number> {
+  if (!isDesktop()) {
+    throw new Error("Recording requires the desktop app");
+  }
+  const channel = new Channel<RecorderEvent>();
+  channel.onmessage = onEvent;
+  return invoke<number>("clone_ref_record_start", {
+    channel,
+    personId,
+    slot,
+    inputDevice: preferredInputDevice(),
+  });
+}
+
+/** Raw quality measurements for a clone-ref take — thresholds live in TS
+ * (`lib/audio/clip-quality.ts`), Rust only measures. */
+export interface ClipQuality {
+  durationSecs: number;
+  peak: number;
+  rms: number;
+  speechRms: number;
+  noiseRms: number;
+  speechSecs: number;
+}
+
+export async function cloneRefQuality(path: string): Promise<ClipQuality> {
+  if (!isDesktop()) {
+    throw new Error("Local speech engines require the desktop app");
+  }
+  return invoke<ClipQuality>("clone_ref_quality", {
+    path,
+    vadModel: activeModel("vad"),
+  });
+}
+
 export interface EnrollResult {
   /** Relative to the person dir — always "embedding.bin". */
   embeddingPath: string;
@@ -778,6 +822,61 @@ export async function ttsSynthesize(
     model: options.model ?? activeModel("tts"),
     maxCacheBytes: useSettingsStore.getState().ttsCacheMaxBytes,
   });
+}
+
+export interface CloneTtsResult extends TtsResult {
+  /** Engine (re)load time — non-zero only when this call warmed ZipVoice. */
+  engineLoadMs: number;
+  synthMs: number;
+}
+
+export interface CloneTtsOptions {
+  speed?: number;
+  model?: string;
+  numSteps?: number;
+  numThreads?: number;
+}
+
+/**
+ * Local zero-shot clone synthesis (ZipVoice, M5): conditions on a reference
+ * clip + its exact transcript. Batch-only — chat runs it sentence-chunked
+ * through the playback queue. A failure is an error, never an API fallback.
+ */
+export async function cloneTtsSynthesize(
+  text: string,
+  refAudio: string,
+  refText: string,
+  options: CloneTtsOptions = {},
+): Promise<CloneTtsResult> {
+  if (!isDesktop()) {
+    throw new Error("Local speech engines require the desktop app");
+  }
+  return invoke<CloneTtsResult>("clone_tts_synthesize", {
+    text,
+    refAudio,
+    refText,
+    speed: options.speed ?? null,
+    model: options.model ?? activeModel("clone-tts"),
+    numSteps: options.numSteps ?? null,
+    numThreads: options.numThreads ?? null,
+    maxCacheBytes: useSettingsStore.getState().ttsCacheMaxBytes,
+  });
+}
+
+/** Pre-load ZipVoice (it is heavyweight and never resident by default) so the
+ * first cloned sentence doesn't pay the load. Returns load ms, 0 if warm. */
+export async function cloneTtsWarm(options: CloneTtsOptions = {}): Promise<number> {
+  if (!isDesktop()) return 0;
+  return invoke<number>("clone_tts_warm", {
+    model: options.model ?? activeModel("clone-tts"),
+    numThreads: options.numThreads ?? null,
+  });
+}
+
+/** Evict the warm ZipVoice engine (~600 MB resident). */
+export async function cloneTtsUnload(): Promise<boolean> {
+  if (!isDesktop()) return false;
+  return invoke<boolean>("clone_tts_unload");
 }
 
 /** Copy a synthesized wav into the bench recording library; returns new path. */

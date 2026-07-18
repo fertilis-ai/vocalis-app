@@ -4,6 +4,7 @@ import {
   type TranscribeFileResult,
   asrTranscribeFile,
   asrTranscribeFileStreaming,
+  cloneTtsSynthesize,
   diarizeFile,
   ttsCacheEvict,
   ttsSynthesize,
@@ -125,17 +126,38 @@ export interface ApiSynthTarget {
   model?: string;
 }
 
-export type SynthTarget = LocalSynthTarget | ApiSynthTarget;
+/** A local ZipVoice clone (M5): the voice is a reference clip + transcript. */
+export interface CloneLocalSynthTarget {
+  kind: "clone-local";
+  /** Path to the clone reference audio (people/<id>/clone-ref/…). */
+  refAudio: string;
+  /** Exact transcript of the reference. */
+  refText: string;
+}
+
+/** An ElevenLabs instant clone (M5): a voice id in the user's account. */
+export interface CloneApiSynthTarget {
+  kind: "clone-api";
+  provider: "elevenlabs";
+  voiceId: string;
+}
+
+export type SynthTarget =
+  | LocalSynthTarget
+  | ApiSynthTarget
+  | CloneLocalSynthTarget
+  | CloneApiSynthTarget;
 
 /**
  * Whether `target` actually honors the speed multiplier. Local synthesis
- * always does; OpenAI only on the legacy tts-1 / tts-1-hd models (not the
- * gpt-4o-mini-tts default); ElevenLabs doesn't expose speed control at all.
- * UI should disable the speed control rather than send a value the engine
- * silently ignores.
+ * (stock and ZipVoice clones) always does; OpenAI only on the legacy tts-1 /
+ * tts-1-hd models (not the gpt-4o-mini-tts default); ElevenLabs doesn't
+ * expose speed control at all. UI should disable the speed control rather
+ * than send a value the engine silently ignores.
  */
 export function targetSupportsSpeed(target: SynthTarget): boolean {
-  if (target.kind === "local") return true;
+  if (target.kind === "local" || target.kind === "clone-local") return true;
+  if (target.kind === "clone-api") return false;
   if (target.provider === "openai") return (target.model ?? "gpt-4o-mini-tts") !== "gpt-4o-mini-tts";
   return false;
 }
@@ -158,6 +180,27 @@ export async function synthesizeWithTarget(
       cached: res.cached,
       processingMs: Math.round(performance.now() - startedAt),
     };
+  }
+
+  if (target.kind === "clone-local") {
+    const startedAt = performance.now();
+    const res = await cloneTtsSynthesize(text, target.refAudio, target.refText, {
+      speed: options.speed,
+    });
+    return {
+      path: res.path,
+      cached: res.cached,
+      processingMs: Math.round(performance.now() - startedAt),
+    };
+  }
+
+  if (target.kind === "clone-api") {
+    // Same raw-mp3 path as a stock ElevenLabs voice, keyed by the clone's id.
+    return synthesizeWithTarget(
+      { kind: "api", provider: "elevenlabs", voice: target.voiceId },
+      text,
+      options,
+    );
   }
 
   const apiKey = requireApiKey(options.apiKeys, target.provider);

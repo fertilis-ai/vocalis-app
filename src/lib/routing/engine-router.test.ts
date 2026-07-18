@@ -155,9 +155,19 @@ describe("resolveEngine", () => {
   });
 
   it("returns null with a reason when nothing serves the task", () => {
+    // ZipVoice is implemented (M5) but no clone-tts model is installed here,
+    // and the API clone engine must never be a silent fallback.
     const resolution = resolveEngine("cloneTts", ctx());
     expect(resolution.active).toBeNull();
-    expect(resolution.reason).toBe("not-implemented");
+    expect(resolution.reason).toBe("not-installed");
+  });
+
+  it("resolves the local clone engine when its model is installed", () => {
+    const resolution = resolveEngine(
+      "cloneTts",
+      ctx({ installedTasks: new Set(["clone-tts"]) }),
+    );
+    expect(resolution.active?.id).toBe("local.zipvoice");
   });
 
   it("resolves local-only tasks without a routing entry", () => {

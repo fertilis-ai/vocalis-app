@@ -4,6 +4,7 @@ import {
   Fingerprint,
   Globe,
   Mic,
+  MicVocal,
   Radio,
   ScanSearch,
   SplitSquareHorizontal,
@@ -13,9 +14,10 @@ import {
 } from "lucide-react";
 
 // The ten sherpa-onnx capabilities plus the Streaming Recognition demo page
-// (spec/spec.md §2.3) — spec §0 moved chat/sessions/dictation to batch ASR,
-// so streaming decode now only lives here. Pages come online per milestone;
-// `available: false` renders the ComingSoon panel.
+// and the Voice cloning bench (spec/spec.md §2.3) — spec §0 moved
+// chat/sessions/dictation to batch ASR, so streaming decode now only lives
+// here. Pages come online per milestone; `available: false` renders the
+// ComingSoon panel.
 export const PLAYGROUND_TOOLS = [
   {
     id: "asr",
@@ -33,6 +35,12 @@ export const PLAYGROUND_TOOLS = [
     id: "tts",
     label: "Speech synthesis",
     icon: AudioLines,
+    available: true,
+  },
+  {
+    id: "clone",
+    label: "Voice cloning",
+    icon: MicVocal,
     available: true,
   },
   {

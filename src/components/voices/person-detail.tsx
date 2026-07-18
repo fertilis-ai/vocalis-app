@@ -4,10 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Person } from "@/lib/schemas/people";
 import { usePeopleStore } from "@/stores/people-store";
+import { CloneRefFlow } from "./clone-ref-flow";
+import { ElevenLabsClone } from "./elevenlabs-clone";
 import { EnrollmentFlow } from "./enrollment-flow";
 
-// Main-pane view for one Person: editable name, color, enrollment status, and
-// the guided enrollment flow. Deleting removes the whole people/<id>/ dir.
+// Main-pane view for one Person: editable name, color, enrollment + clone
+// status (profiles show which flows they've completed — spec §2.4), the guided
+// enrollment flow, and the clone-reference flow. Deleting removes the whole
+// people/<id>/ dir.
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -74,6 +78,11 @@ export function PersonDetail({ person }: { person: Person }) {
               Not enrolled
             </span>
           )}
+          {person.cloneRef && (
+            <span className="flex items-center gap-1 rounded-full bg-sky-500/10 px-2.5 py-1 text-sky-600 text-xs dark:text-sky-400">
+              <Check className="h-3.5 w-3.5" /> Clone
+            </span>
+          )}
           <Button
             variant="ghost"
             size="icon-xs"
@@ -101,6 +110,16 @@ export function PersonDetail({ person }: { person: Person }) {
           {person.enrollment ? "Re-record voice" : "Enroll voice"}
         </h2>
         <EnrollmentFlow person={person} />
+      </section>
+
+      <section>
+        <h2 className="mb-3 font-medium text-sm">Voice clone</h2>
+        <CloneRefFlow person={person} />
+      </section>
+
+      <section>
+        <h2 className="mb-3 font-medium text-sm">ElevenLabs clone</h2>
+        <ElevenLabsClone person={person} />
       </section>
     </div>
   );

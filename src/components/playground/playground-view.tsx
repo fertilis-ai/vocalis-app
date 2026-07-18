@@ -1,5 +1,6 @@
 import { useSearch } from "@tanstack/react-router";
 import { AsrTool } from "./asr-tool";
+import { CloneTool } from "./clone-tool";
 import { DiarizationTool } from "./diarization-tool";
 import { KwsTool } from "./kws-tool";
 import { LangIdTool } from "./langid-tool";
@@ -22,6 +23,8 @@ export function PlaygroundView() {
       return <StreamingRecognitionTool />;
     case "tts":
       return <TtsTool />;
+    case "clone":
+      return <CloneTool />;
     case "vad":
       return <VadTool />;
     case "speaker-id":

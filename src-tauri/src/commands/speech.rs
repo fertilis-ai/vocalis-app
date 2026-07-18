@@ -10,10 +10,10 @@ use tauri::State;
 use crate::audio::{list_input_devices, InputDeviceInfo, TARGET_SAMPLE_RATE};
 use crate::commands::app_data_dir;
 use crate::engines::{
-    cosine_similarity, detect_speech_spans, spot_keywords_in_clip, DiarizationParams,
-    DiarizationSegment, Diarizer, KeywordHit, LangIdentifier, OfflineAsr, Punctuator,
-    SourceSeparator, SpeakerEmbedder, SpeechSpan, StreamingAsrSession, TtsEngine, VadParams,
-    WordSpan,
+    cosine_similarity, detect_speech_spans, spot_keywords_in_clip, CloneTtsEngine,
+    DiarizationParams, DiarizationSegment, Diarizer, KeywordHit, LangIdentifier, OfflineAsr,
+    Punctuator, SourceSeparator, SpeakerEmbedder, SpeechSpan, StreamingAsrSession, TtsEngine,
+    VadParams, WordSpan, CLONE_TTS_DEFAULT_STEPS,
 };
 use crate::pipeline::{
     start_asr_pipeline, start_import, start_kws_pipeline, start_recorder, start_session_pipeline,
@@ -22,7 +22,8 @@ use crate::pipeline::{
 };
 use crate::registry;
 use crate::state::{
-    DiarizerSlot, LangIdSlot, OfflineAsrSlot, SeparatorSlot, SpeakerSlot, SpeechState, TtsSlot,
+    CloneTtsSlot, DiarizerSlot, LangIdSlot, OfflineAsrSlot, SeparatorSlot, SpeakerSlot,
+    SpeechState, TtsSlot,
 };
 
 /// Threads per engine on Apple Silicon: enough for realtime, leaves headroom
@@ -413,6 +414,191 @@ pub fn tts_synthesize(
         path: out_path.to_string_lossy().into_owned(),
         duration_secs,
         cached: false,
+    })
+}
+
+/// ZipVoice thread budget: the spike hit 0.8 s TTFA at 8 threads on 12 cores
+/// (RTF 1.24 single-threaded), so throughput matters more here than for the
+/// light stock-TTS engines — but VAD/ASR must keep headroom in a live chat.
+fn clone_tts_default_threads() -> i32 {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(8);
+    (cores - 4).clamp(4, 8)
+}
+
+/// Load (or reload) the clone-TTS engine into its slot; returns load time in
+/// ms, 0.0 when it was already warm with the same model + thread count.
+fn ensure_clone_tts(
+    guard: &mut Option<CloneTtsSlot>,
+    model_dir: PathBuf,
+    num_threads: i32,
+) -> Result<f64, String> {
+    let warm = matches!(
+        guard.as_ref(),
+        Some(s) if s.model_dir == model_dir && s.num_threads == num_threads
+    );
+    if warm {
+        return Ok(0.0);
+    }
+    log::info!(
+        "[speech] loading clone-tts from {} ({num_threads} threads)",
+        model_dir.display()
+    );
+    let started = std::time::Instant::now();
+    let engine = CloneTtsEngine::new(&model_dir, num_threads)?;
+    let load_ms = started.elapsed().as_secs_f64() * 1000.0;
+    *guard = Some(CloneTtsSlot {
+        model_dir,
+        num_threads,
+        engine,
+    });
+    Ok(load_ms)
+}
+
+/// Pre-load the ZipVoice engine (the spec §3.3 "warming up" surface): the
+/// webview calls this on conversation open when the conversation's voice is a
+/// local clone, showing its own warming state while it awaits. Returns load ms.
+#[tauri::command]
+pub fn clone_tts_warm(
+    state: State<'_, SpeechState>,
+    model: Option<String>,
+    num_threads: Option<i32>,
+) -> Result<f64, String> {
+    let model_dir = resolve_model_dir("clone-tts", model, "voice cloning")?;
+    let threads = num_threads.unwrap_or_else(clone_tts_default_threads);
+    let mut guard = state.clone_tts.lock().unwrap();
+    ensure_clone_tts(&mut guard, model_dir, threads)
+}
+
+/// Drop the warm ZipVoice engine (~600 MB resident) — the EngineManager
+/// eviction hook (spec §7.7). Returns true if an engine was actually unloaded.
+#[tauri::command]
+pub fn clone_tts_unload(state: State<'_, SpeechState>) -> Result<bool, String> {
+    let unloaded = state.clone_tts.lock().unwrap().take().is_some();
+    if unloaded {
+        log::info!("[speech] unloaded clone-tts engine");
+    }
+    Ok(unloaded)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneTtsResult {
+    pub path: String,
+    pub duration_secs: f64,
+    pub cached: bool,
+    /// Engine load time when this call had to (re)load ZipVoice, else 0 —
+    /// lets the webview log warm-up separately from synthesis in Metrics.
+    pub engine_load_ms: f64,
+    pub synth_ms: f64,
+}
+
+/// Clone-voice synthesis (M5 item 2): ZipVoice conditioned on a reference
+/// clip + its transcript. Output wavs share the stock-TTS cache dir and LRU
+/// cap. A failing synth is an error — never a silent reroute to an API engine
+/// (spec §3.4).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn clone_tts_synthesize(
+    state: State<'_, SpeechState>,
+    text: String,
+    ref_audio: String,
+    ref_text: String,
+    model: Option<String>,
+    speed: Option<f32>,
+    num_steps: Option<i32>,
+    num_threads: Option<i32>,
+    max_cache_bytes: Option<u64>,
+) -> Result<CloneTtsResult, String> {
+    let speed = speed.unwrap_or(1.0);
+    let steps = num_steps.unwrap_or(CLONE_TTS_DEFAULT_STEPS);
+    let threads = num_threads.unwrap_or_else(clone_tts_default_threads);
+    // The webview references clone clips as ~/.vocalis/people/… paths.
+    let ref_audio = crate::commands::expand_tilde(&ref_audio);
+
+    let model_dir = resolve_model_dir("clone-tts", model, "voice cloning")?;
+    let model_tag = model_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("clone-tts");
+
+    let cache_dir = app_data_dir()?.join("cache/tts");
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+
+    // Content-addressed like tts_synthesize, but the voice is the reference
+    // clip: key on its mtime + size too, so re-recording a clone reference at
+    // the same path never replays the old voice.
+    let ref_meta = std::fs::metadata(&ref_audio)
+        .map_err(|e| format!("reference audio {ref_audio}: {e}"))?;
+    let ref_stamp = ref_meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let mut hasher = DefaultHasher::new();
+    (
+        model_tag,
+        &text,
+        &ref_audio,
+        ref_stamp,
+        ref_meta.len(),
+        &ref_text,
+        speed.to_bits(),
+        steps,
+    )
+        .hash(&mut hasher);
+    let out_path = cache_dir.join(format!("{model_tag}-{:016x}.wav", hasher.finish()));
+
+    if out_path.exists() {
+        if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&out_path) {
+            let _ = file.set_modified(SystemTime::now());
+        }
+        return Ok(CloneTtsResult {
+            path: out_path.to_string_lossy().into_owned(),
+            duration_secs: 0.0,
+            cached: true,
+            engine_load_ms: 0.0,
+            synth_ms: 0.0,
+        });
+    }
+
+    let ref_samples = read_wav_16k(&ref_audio)?;
+
+    let mut guard = state.clone_tts.lock().unwrap();
+    let engine_load_ms = ensure_clone_tts(&mut guard, model_dir, threads)?;
+    let engine = &guard.as_ref().unwrap().engine;
+
+    let started = std::time::Instant::now();
+    let duration_secs = engine.synthesize_to_wav(
+        &text,
+        &ref_samples,
+        TARGET_SAMPLE_RATE as i32,
+        &ref_text,
+        speed,
+        steps,
+        &out_path,
+    )?;
+    let synth_ms = started.elapsed().as_secs_f64() * 1000.0;
+    drop(guard);
+    log::info!(
+        "[speech] clone-tts synthesized {duration_secs:.2}s in {synth_ms:.0}ms \
+         (load {engine_load_ms:.0}ms, rtf {:.2})",
+        synth_ms / 1000.0 / duration_secs.max(0.001)
+    );
+
+    let cap = max_cache_bytes.unwrap_or(TTS_CACHE_DEFAULT_BYTES);
+    if let Err(e) = evict_tts_cache(&cache_dir, cap) {
+        log::warn!("[speech] tts cache eviction failed: {e}");
+    }
+
+    Ok(CloneTtsResult {
+        path: out_path.to_string_lossy().into_owned(),
+        duration_secs,
+        cached: false,
+        engine_load_ms,
+        synth_ms,
     })
 }
 

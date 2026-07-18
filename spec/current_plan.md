@@ -2,7 +2,7 @@
 
 > **Keep this file current-only.** It holds the status snapshot, the active work item, and open gates — nothing else. When a work item completes, move its detailed record into the matching milestone file (`M0.md` … `M5.md`) and trim this document. The product/technical spec is `spec.md` (same folder).
 
-_Last updated: 2026-07-11._
+_Last updated: 2026-07-16._
 
 ## Status
 
@@ -13,7 +13,7 @@ _Last updated: 2026-07-11._
 | M2 — Playground complete | [M2.md](M2.md) | 🔶 in progress — items 1–10 code-complete (item 9 batch adapters only); Deepgram streaming + live verification remain |
 | M3 — Sessions | [M3.md](M3.md) | 🔶 code-complete — all 5 items done (schemas/collection kit; live session pipeline; People enrollment; file import; session UI + exports). Human live exit test pending |
 | M4 — LLM voice chat | [M4.md](M4.md) | 🔶 code-complete — all 4 items done (pi-ai LLM layer, chat persistence/text-chat/read-aloud, Rust voice capture pipeline, barge-in/echo mitigation v1, push-to-talk, Voice Chat settings). Human live exit test pending |
-| M5 — Voice cloning | [M5.md](M5.md) | ⬜ not started |
+| M5 — Voice cloning | [M5.md](M5.md) | 🔶 code-complete — all 4 items done (ZipVoice engine + commands, clone-ref flow with quality gate/transcript/consent, ElevenLabs instant clone, unified voice library + pickers + warm-up). Real-model ZipVoice test passes (RTF 0.28). Spike-listen gate + human exit test pending |
 
 ## Now
 
@@ -32,7 +32,8 @@ Item 10 build record + deferrals (URL custom-source, clone-tts custom-add) are i
 - **M3.4 import live pass:** the file-import pipeline (decoders + local run + API orchestration) is code-complete but unexercised in the running app. Needs a `desktop:dev` pass importing a real mp3/m4a/flac with local ASR/diarization/speaker/punctuation models installed (confirm `symphonia` decode + `audio.wav` + a settled transcript in the session store); the API path additionally needs real keys (folds into the M2 item 9 keyed pass). Rendering the result is item 5.
 - **M3 live exit test (closes M3):** `desktop:dev` pass with real models — record a live multi-speaker session (partials → provisional turns → stop-time refine → names), scrub + per-bubble play, edit a segment, rename/merge/assign speakers, export markdown/SRT/JSON, toggle retention + discard. Also folds in the M3.4 import live pass and the item 1–3 smoke passes (tree round-trip; enroll a person). See M3.md item 5 caveats.
 - **M4 live exit test (closes M4):** all four items are code-complete and pass `check-types`/`lint`/`test:run`/`cargo check`, but nothing has been exercised in `bun run desktop:dev` yet. Needs: (1) a live pass with a real LLM key/local model and a downloaded TTS voice over text chat + read-aloud; (2) the hands-free/barge-in/echo exit test from M4.md's Rules — multi-turn hands-free conversation with headphones **and** speakers, interrupt mid-reply at least three times, confirm no echo loops with speakers + playback-aware VAD gating; (3) a push-to-talk pass and a spot-check of the new Voice Chat settings (VAD silence slider, barge-in toggle, default voice/model prefill on new conversations). This is a human/on-device test — record results here when run.
-- **ZipVoice spike listen (M5 gate):** listen to `~/.vocalis/recordings/zipvoice-spike/` and record the quality verdict.
+- **ZipVoice spike listen (M5 gate — now retroactive):** listen to `~/.vocalis/recordings/zipvoice-spike/` and record the quality verdict. M5's flows were built (2026-07-16) without this gate cleared; if int8 quality disappoints, the fallback (`zipvoice-distill-fp32`, or F5-TTS behind the same `CloneTtsEngine` shape) swaps in behind unchanged UI/commands.
+- **M5 live exit test (closes M5):** `desktop:dev` pass — record a clone reference in a Person profile (exercise the quality gate with a deliberately clipped/quiet take), verify the Whisper transcript + consent flow, hear the clone in the voice library preview and the playground bench, then the exit test proper: a hands-free chat conversation answered in Martin's cloned voice with the network disabled (privacy mode on, local LLM). Profile TTFA against the < 1.5 s target (debug: `clone_tts_synthesize` returns `engineLoadMs`/`synthMs`; warm-up fires on conversation open). Also exercise the ElevenLabs clone create/delete (keyed, folds into the M2 item 9 keyed pass) and check memory with live-session + ZipVoice warm (evict via `clone_tts_unload` if needed).
 - **Embedding model check (before M3 item 3):** the shipped `campplus-en-voxceleb` may discriminate French speakers poorly — see the caveat in [M2.md](M2.md) item 6; swap the default model before building People enrollment if so.
 
 ## Working rules

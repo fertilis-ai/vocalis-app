@@ -174,6 +174,9 @@ pub fn run() {
             chat_capture_force_finalize,
             inject_text,
             tts_synthesize,
+            clone_tts_synthesize,
+            clone_tts_warm,
+            clone_tts_unload,
             tts_cache_size,
             tts_cache_evict,
             tts_save_to_library,
@@ -194,9 +197,11 @@ pub fn run() {
             record_stop,
             record_cancel,
             audio_file_info,
-            // people (enrollment)
+            // people (enrollment + clone reference)
             enroll_record_start,
             enroll_person,
+            clone_ref_record_start,
+            clone_ref_quality,
             // models (catalog + downloads)
             models_catalog,
             models_installed,

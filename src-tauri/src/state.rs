@@ -3,7 +3,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::engines::{
-    Diarizer, LangIdentifier, OfflineAsr, Punctuator, SourceSeparator, SpeakerEmbedder, TtsEngine,
+    CloneTtsEngine, Diarizer, LangIdentifier, OfflineAsr, Punctuator, SourceSeparator,
+    SpeakerEmbedder, TtsEngine,
 };
 use crate::pipeline::{ChatCaptureRegistry, DictationRegistry, PipelineRegistry, RecorderRegistry};
 
@@ -54,6 +55,17 @@ pub struct TtsSlot {
     pub engine: TtsEngine,
 }
 
+/// Cached ZipVoice clone-TTS engine plus the (model dir, thread count) it was
+/// loaded with. Heavyweight (~600 MB resident): it loads lazily via
+/// `clone_tts_warm`/`clone_tts_synthesize` and — unlike the other slots — can
+/// be evicted with `clone_tts_unload` so it is never resident by default
+/// (spec §3.3, §7.7).
+pub struct CloneTtsSlot {
+    pub model_dir: PathBuf,
+    pub num_threads: i32,
+    pub engine: CloneTtsEngine,
+}
+
 /// Tauri managed state for the speech stack (spec §3.3 EngineManager).
 ///
 /// Heavy engines load lazily on first use and stay warm; pipelines register
@@ -61,6 +73,7 @@ pub struct TtsSlot {
 #[derive(Default)]
 pub struct SpeechState {
     pub tts: Mutex<Option<TtsSlot>>,
+    pub clone_tts: Mutex<Option<CloneTtsSlot>>,
     pub punctuator: Mutex<Option<PunctuatorSlot>>,
     pub offline_asr: Mutex<Option<OfflineAsrSlot>>,
     pub speaker: Mutex<Option<SpeakerSlot>>,
@@ -84,6 +97,9 @@ impl SpeechState {
     pub fn model_in_use(&self, model_dir: &Path) -> bool {
         let mut held: Vec<PathBuf> = Vec::new();
         if let Some(s) = self.tts.lock().unwrap().as_ref() {
+            held.push(s.model_dir.clone());
+        }
+        if let Some(s) = self.clone_tts.lock().unwrap().as_ref() {
             held.push(s.model_dir.clone());
         }
         if let Some(s) = self.punctuator.lock().unwrap().as_ref() {

@@ -1,11 +1,19 @@
 import { ELEVENLABS_DEFAULT_VOICE } from "@/lib/engines/elevenlabs";
 import { ttsSynthesize } from "@/lib/engines/local";
-import { synthesizeWithTarget } from "@/lib/engines/port";
-import { resolveEngine, type RouterContext } from "@/lib/routing/engine-router";
+import { type SynthTarget, synthesizeWithTarget } from "@/lib/engines/port";
+import { findEngine } from "@/lib/engines/descriptors";
+import {
+  evaluateEngine,
+  REASON_LABELS,
+  resolveEngine,
+  type RouterContext,
+} from "@/lib/routing/engine-router";
 import {
   MAX_SPEECH_INPUT_CHARS,
   stripMarkdownForSpeech,
 } from "@/lib/llm/strip-markdown-for-speech";
+import { personDir, usePeopleStore } from "@/stores/people-store";
+import { useVoicesStore } from "@/stores/voices-store";
 
 const OPENAI_DEFAULT_VOICE = "alloy";
 
@@ -27,11 +35,14 @@ export async function synthesizeMessageSpeech(
 }
 
 /**
- * Synthesize already-speech-ready text (no markdown stripping). Resolves the
- * active engine through the `tts` task router — never a silent local→API
- * fallback — then dispatches to the local or API synth path. `voiceId` is the
- * conversation's picked voice (sherpa speaker id for local, provider voice id
- * for API); unset falls back to the engine default.
+ * Synthesize already-speech-ready text (no markdown stripping). Clone voices
+ * (voiceId "clone:zipvoice:<personId>" / "clone:elevenlabs:<personId>", M5)
+ * dispatch to the cloneTts engine the voice belongs to — a clone voice is
+ * bound to its engine, so an ineligible engine is an error, never a reroute.
+ * Other voices resolve through the `tts` task router — likewise never a
+ * silent local→API fallback. `voiceId` is the conversation's picked voice
+ * (sherpa speaker id for local, provider voice id for API); unset falls back
+ * to the engine default.
  */
 export async function synthesizeSpeech(
   input: string,
@@ -39,6 +50,16 @@ export async function synthesizeSpeech(
   apiKeys: Record<string, string>,
   voiceId?: string,
 ): Promise<{ path: string }> {
+  if (voiceId?.startsWith("clone:")) {
+    const target = await resolveCloneTarget(voiceId, ctx);
+    // Clone voice ids double as voice-library ids — honor the per-voice
+    // default speed (spec §3.5 TtsVoice.params).
+    await useVoicesStore.getState().load();
+    const speed = useVoicesStore.getState().voices[voiceId]?.params.speed;
+    const res = await synthesizeWithTarget(target, input, { apiKeys, speed });
+    return { path: res.path };
+  }
+
   const engine = resolveEngine("tts", ctx).active;
   if (!engine) throw new Error("No text-to-speech engine is available for read-aloud.");
 
@@ -61,4 +82,43 @@ export async function synthesizeSpeech(
     { apiKeys },
   );
   return { path: res.path };
+}
+
+/**
+ * Resolve a stored clone voice id into its synth target, enforcing the
+ * engine's eligibility (privacy mode hard-blocks the ElevenLabs clone; a
+ * missing clone-tts model blocks ZipVoice) — spec §3.4's no-fallback rule.
+ */
+async function resolveCloneTarget(
+  voiceId: string,
+  ctx: RouterContext,
+): Promise<SynthTarget> {
+  const [, engineKind, personId] = voiceId.split(":");
+  const engineId = engineKind === "zipvoice" ? "local.zipvoice" : "elevenlabs.clone";
+  const engine = findEngine("cloneTts", engineId);
+  if (!engine) throw new Error(`Unknown clone voice "${voiceId}".`);
+  const { eligible, reason } = evaluateEngine(engine, ctx);
+  if (!eligible) {
+    throw new Error(
+      `${engine.label} is unavailable${reason ? ` (${REASON_LABELS[reason]})` : ""}.`,
+    );
+  }
+
+  const peopleStore = usePeopleStore.getState();
+  await peopleStore.loadAll();
+  const person = usePeopleStore.getState().people[personId];
+  if (!person) throw new Error("The cloned voice's person profile is missing.");
+
+  if (engineKind === "zipvoice") {
+    const clone = person.clones.zipvoice;
+    if (!clone) throw new Error(`${person.name} has no local clone reference.`);
+    return {
+      kind: "clone-local",
+      refAudio: `${personDir(person.id)}/${clone.refAudio}`,
+      refText: clone.refText,
+    };
+  }
+  const clone = person.clones.elevenlabs;
+  if (!clone) throw new Error(`${person.name} has no ElevenLabs clone.`);
+  return { kind: "clone-api", provider: "elevenlabs", voiceId: clone.voiceId };
 }

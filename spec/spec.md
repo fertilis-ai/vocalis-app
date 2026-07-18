@@ -57,9 +57,9 @@ One section, one sidebar tree (folders, pinning, rename — Sapio's shared sideb
 - **Export**: markdown (speaker-labeled), SRT, JSON (full timing + speaker + confidence).
 - Session audio is retained (FLAC) by default; a per-session toggle discards it on close.
 
-### 2.3 Playground — eleven tool pages on one audio bench
+### 2.3 Playground — twelve tool pages on one audio bench
 
-Sidebar lists the eleven capabilities; each page is thin, assembled from the shared **audio bench** kit:
+Sidebar lists the twelve capabilities; each page is thin, assembled from the shared **audio bench** kit:
 
 - **Input source panel**: mic (with live waveform + level meter), file drop, or pick from the recording library (saved session/playground audio).
 - **Engine picker**: local models installed for this task + applicable API engines; disabled entries show why (not downloaded / privacy mode / no key).
@@ -73,6 +73,7 @@ Per-capability pages:
 | Speech recognition | file | batch transcript, word timestamps, RTF + latency stats, side-by-side engine compare (run same audio through 2 engines) |
 | Streaming Recognition | mic (streaming) | live partial/final transcript, word timestamps — the production chat/live/dictation pipelines no longer use this decode mode; it's kept here as a capability demo |
 | Speech synthesis | text | voice picker (full library incl. clones), speed/pitch params, waveform of result, save-to-library, A/B two voices |
+| Voice cloning | text + reference clip (a Person's saved clone ref, or ad-hoc mic/file/library clip with its transcript) | zero-shot ZipVoice synthesis, speed / sampling-steps params, engine load + synth timing, warm/unload engine controls, save-to-library (M5; en/zh only, §7.1) |
 | Voice activity detection | mic or file | live speech/silence timeline strip, threshold/min-duration params, segment list with per-segment playback |
 | Speaker identification | mic or file | ranked matches against enrolled People with cosine scores |
 | Speaker verification | pick a Person + mic/file | accept/reject vs threshold, score dial, threshold slider with live re-evaluation |

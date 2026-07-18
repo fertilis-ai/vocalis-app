@@ -7,6 +7,7 @@ mod punctuation;
 mod separation;
 mod speaker;
 mod tts;
+mod tts_zipvoice;
 mod vad;
 
 pub use asr_offline::*;
@@ -18,4 +19,5 @@ pub use punctuation::*;
 pub use separation::*;
 pub use speaker::*;
 pub use tts::*;
+pub use tts_zipvoice::*;
 pub use vad::*;

@@ -15,8 +15,10 @@ import {
 import type { PlaygroundRun } from "@/lib/schemas/playground";
 import { isDesktop } from "@/lib/storage";
 import { useModelsStore } from "@/stores/models-store";
+import { usePeopleStore } from "@/stores/people-store";
 import { usePlaygroundStore } from "@/stores/playground-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useVoicesStore } from "@/stores/voices-store";
 
 const TOOL = "tts";
 
@@ -35,13 +37,23 @@ export function TtsTool() {
   const loadInstalled = useModelsStore((s) => s.loadInstalled);
   const apiKeys = useSettingsStore((s) => s.apiKeys);
   const privacyMode = useSettingsStore((s) => s.privacyMode);
+  const people = usePeopleStore((s) => s.people);
+  const loadPeople = usePeopleStore((s) => s.loadAll);
+  const library = useVoicesStore((s) => s.voices);
+  const loadLibrary = useVoicesStore((s) => s.load);
   useEffect(() => {
     if (!installedScanned) void loadInstalled();
-  }, [installedScanned, loadInstalled]);
+    void loadPeople();
+    void loadLibrary();
+  }, [installedScanned, loadInstalled, loadPeople, loadLibrary]);
 
   const groups = useMemo(
-    () => buildVoiceGroups(installed, apiKeys, privacyMode),
-    [installed, apiKeys, privacyMode],
+    () =>
+      buildVoiceGroups(installed, apiKeys, privacyMode, {
+        people: Object.values(people),
+        library,
+      }),
+    [installed, apiKeys, privacyMode, people, library],
   );
   const voices = useMemo(() => groups.flatMap((g) => g.voices), [groups]);
   const voiceByKey = useCallback(
@@ -163,7 +175,7 @@ export function TtsTool() {
         <div>
           <h1 className="font-semibold text-xl">Speech synthesis</h1>
           <p className="text-muted-foreground text-sm">
-            Local & cloud multi-voice TTS. Cloned voices arrive with M5.
+            Local & cloud multi-voice TTS, including cloned voices from People.
           </p>
         </div>
         <span className="flex items-center gap-1 rounded-full border border-border px-2 py-1 text-muted-foreground text-xs">
