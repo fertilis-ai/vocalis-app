@@ -177,7 +177,7 @@ pub fn dictation_finalize(
 
     Ok(guard
         .as_ref()
-        .map(|slot| slot.engine.punctuate(&raw))
+        .map(|slot| slot.engine.punctuate_if_needed(&raw))
         .unwrap_or(raw))
 }
 

@@ -25,23 +25,31 @@ pub struct Transcription {
 
 /// Merge BPE tokens + per-token timestamps into words. Whisper tokens mark
 /// word starts with a leading space, zipformer tokens with '▁' (sentencepiece);
-/// a token carrying neither continues the previous word.
+/// a token carrying neither continues the previous word. Some vocabularies
+/// (NeMo Nemotron) emit a bare '▁' token before an unprefixed piece; that
+/// marker carries over to the next piece.
 pub fn merge_tokens_into_words(tokens: &[String], timestamps: Option<&[f32]>) -> Vec<WordSpan> {
     let Some(timestamps) = timestamps else {
         return Vec::new();
     };
     let mut words: Vec<WordSpan> = Vec::new();
+    let mut pending_start: Option<f32> = None;
     for (token, &start) in tokens.iter().zip(timestamps) {
-        let starts_word = token.starts_with(' ') || token.starts_with('▁');
+        let marked = token.starts_with(' ') || token.starts_with('▁');
         let piece = token.trim_start_matches([' ', '▁']);
         if piece.is_empty() {
+            if marked {
+                pending_start.get_or_insert(start);
+            }
             continue;
         }
+        let carried = pending_start.take();
+        let word_start = if marked { Some(start) } else { carried };
         match words.last_mut() {
-            Some(last) if !starts_word => last.text.push_str(piece),
+            Some(last) if word_start.is_none() => last.text.push_str(piece),
             _ => words.push(WordSpan {
                 text: piece.to_string(),
-                start,
+                start: word_start.unwrap_or(start),
             }),
         }
     }
@@ -138,6 +146,18 @@ mod tests {
         );
         let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
         assert_eq!(texts, ["HELLO", "WORLD"]);
+    }
+
+    #[test]
+    fn bare_marker_starts_the_next_unprefixed_piece() {
+        // Nemotron vocab: "▁" then "quick" for the word " quick".
+        let words = merge_tokens_into_words(
+            &tokens(&["▁The", "▁", "quick", "▁", "bro", "wn"]),
+            Some(&[0.0, 0.3, 0.35, 0.6, 0.65, 0.7]),
+        );
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(texts, ["The", "quick", "brown"]);
+        assert_eq!(words[1].start, 0.3);
     }
 
     #[test]

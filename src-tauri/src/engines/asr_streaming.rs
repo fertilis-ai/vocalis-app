@@ -8,6 +8,10 @@ use sherpa_onnx::{
 use crate::engines::{merge_tokens_into_words, Transcription};
 use crate::registry::find_file;
 
+/// 1 s of silence at 16 kHz — covers the largest chunk + lookahead among the
+/// catalog's streaming models (Nemotron 560 ms chunks).
+const FILE_TAIL_PADDING_SAMPLES: usize = 16_000;
+
 /// Streaming Zipformer transducer session (spec §3.3 `StreamingAsr`).
 pub struct StreamingAsrSession {
     recognizer: OnlineRecognizer,
@@ -114,6 +118,12 @@ impl StreamingAsrSession {
     pub fn transcribe_file(&self, samples: &[f32]) -> Result<Transcription, String> {
         let stream = self.recognizer.create_stream();
         stream.accept_waveform(crate::audio::TARGET_SAMPLE_RATE as i32, samples);
+        // Streaming encoders look ahead (right context / chunk size); without
+        // trailing silence the last words never get decoded.
+        stream.accept_waveform(
+            crate::audio::TARGET_SAMPLE_RATE as i32,
+            &vec![0.0; FILE_TAIL_PADDING_SAMPLES],
+        );
         stream.input_finished();
         while self.recognizer.is_ready(&stream) {
             self.recognizer.decode(&stream);

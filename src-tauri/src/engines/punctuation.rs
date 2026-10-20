@@ -38,6 +38,24 @@ impl Punctuator {
             None => text.to_string(),
         }
     }
+
+    /// Pipeline variant: skip the model when the ASR engine already
+    /// punctuated its output (Whisper, Parakeet, Nemotron, …) — spec §2.2B
+    /// "+ punctuation if the engine leaves none". Re-punctuating cased,
+    /// punctuated text doubles marks, and the zh/en model mangles French.
+    pub fn punctuate_if_needed(&self, text: &str) -> String {
+        if has_sentence_punctuation(text) {
+            return text.to_string();
+        }
+        self.punctuate(text)
+    }
+}
+
+/// Whether text already carries sentence punctuation, so the punctuator can be
+/// skipped. Covers both ASCII and CJK/French terminal marks.
+pub fn has_sentence_punctuation(text: &str) -> bool {
+    text.chars()
+        .any(|c| matches!(c, '.' | ',' | '!' | '?' | ';' | ':' | '。' | '，' | '！' | '？' | '、'))
 }
 
 /// The zh-en CT-Transformer emits full-width CJK marks (。，？！) even on
@@ -70,7 +88,15 @@ fn normalize_fullwidth(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_fullwidth;
+    use super::{has_sentence_punctuation, normalize_fullwidth};
+
+    #[test]
+    fn punctuation_detection() {
+        assert!(has_sentence_punctuation("Hello, world."));
+        assert!(has_sentence_punctuation("really?"));
+        assert!(!has_sentence_punctuation("hello world"));
+        assert!(!has_sentence_punctuation("no marks here"));
+    }
 
     #[test]
     fn maps_cjk_marks_to_ascii_with_spacing() {

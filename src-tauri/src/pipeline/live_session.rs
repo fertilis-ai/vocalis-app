@@ -301,7 +301,7 @@ fn emit_turn(
     segments: &mut Vec<CapturedSegment>,
     send: &dyn Fn(PipelineEvent),
 ) {
-    let text = punctuator.punctuate(raw_text.trim());
+    let text = punctuator.punctuate_if_needed(raw_text.trim());
     if text.trim().is_empty() {
         return;
     }

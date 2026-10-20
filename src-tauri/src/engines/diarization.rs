@@ -46,6 +46,7 @@ fn build_config(
         segmentation: OfflineSpeakerSegmentationModelConfig {
             pyannote: OfflineSpeakerSegmentationPyannoteModelConfig {
                 model: Some(segmentation_model.to_string_lossy().into_owned()),
+                ..Default::default()
             },
             num_threads,
             ..Default::default()
@@ -58,6 +59,7 @@ fn build_config(
         clustering: FastClusteringConfig {
             num_clusters: params.num_speakers.unwrap_or(-1),
             threshold: params.threshold,
+            ..Default::default()
         },
         ..Default::default()
     }

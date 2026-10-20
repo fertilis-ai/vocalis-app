@@ -4,8 +4,8 @@
     {
       "id": "silero-vad-v5",
       "task": "vad",
-      "name": "Silero VAD v5",
-      "description": "Voice activity detection used by every realtime pipeline (dictation, live sessions, chat turn-taking). Language-agnostic, ~2 MB resident.",
+      "name": "Silero VAD v4",
+      "description": "Voice activity detection used by every realtime pipeline (dictation, live sessions, chat turn-taking). k2-fsa's 16 kHz export of Silero v4 (the id predates that correction). Language-agnostic, ~2 MB resident.",
       "languages": [],
       "sizeBytes": 643854,
       "quantization": null,
@@ -19,7 +19,7 @@
       "id": "zipformer-en-2023-06-26",
       "task": "asr-streaming",
       "name": "Zipformer streaming EN",
-      "description": "Streaming Zipformer transducer for English \u2014 the realtime engine behind dictation, live transcription, and voice chat. Includes fp32 and int8 weights (int8 preferred at load).",
+      "description": "Streaming Zipformer transducer for English (LibriSpeech-trained, uppercase, no punctuation) \u2014 a lightweight fallback for slower machines. Includes fp32 and int8 weights (int8 preferred at load).",
       "languages": [
         "en"
       ],
@@ -29,13 +29,46 @@
       "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
       "sha256": "639e25b578e9e997131402199419c13a941f8e4e198e2da1ce57dbf5cf401282",
       "archive": "tar.bz2",
+      "recommended": false
+    },
+    {
+      "id": "nemotron-3.5-streaming-560ms-int8",
+      "task": "asr-streaming",
+      "name": "Nemotron 3.5 streaming (EN/FR, 560 ms)",
+      "description": "NVIDIA Nemotron 3.5 cache-aware streaming transducer (int8) \u2014 live recognition with partial results (playground streaming tool and ASR bench). One model covers 40 locales including English and French, with automatic language detection, and outputs punctuated, cased text. 560 ms chunks.",
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "sizeBytes": 475271763,
+      "quantization": "int8",
+      "license": "OpenMDW-1.1",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11.tar.bz2",
+      "sha256": "c6bf5e0df765f9d5b43bc9e0536d4b4b3e7d40bdf5ecf13e45f134c51c05ae3a",
+      "archive": "tar.bz2",
       "recommended": true
+    },
+    {
+      "id": "zipformer-fr-kroko-2025-08-06",
+      "task": "asr-streaming",
+      "name": "Kroko streaming FR",
+      "description": "Small streaming Zipformer transducer for French (Banafo Kroko community model) \u2014 punctuated, cased output at a fraction of Nemotron's size and CPU cost. French only.",
+      "languages": [
+        "fr"
+      ],
+      "sizeBytes": 57220361,
+      "quantization": null,
+      "license": "CC-BY-SA (Kroko community model)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-fr-kroko-2025-08-06.tar.bz2",
+      "sha256": "e6ffd3dc43725cd6c8137b05c739f15607d0df946b9b90eb141e10059efca024",
+      "archive": "tar.bz2",
+      "recommended": false
     },
     {
       "id": "whisper-small-int8",
       "task": "asr-batch",
       "name": "Whisper small (multilingual)",
-      "description": "Offline Whisper small for file imports \u2014 good quality on English and French (99 languages total). Includes fp32 and int8 weights; inline punctuation built in.",
+      "description": "Offline Whisper small (99 languages) \u2014 covers languages beyond Parakeet's 25, but slower and less accurate on English and French. Includes fp32 and int8 weights; inline punctuation built in.",
       "languages": [
         "en",
         "fr"
@@ -46,13 +79,13 @@
       "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2",
       "sha256": "486a46afbb7ba798507190ffe02fea2dd726049af212e774537efac6afb210a6",
       "archive": "tar.bz2",
-      "recommended": true
+      "recommended": false
     },
     {
       "id": "parakeet-tdt-0.6b-v3-int8",
       "task": "asr-batch",
       "name": "Parakeet TDT v3 (25 languages)",
-      "description": "NVIDIA NeMo Parakeet TDT v3 transducer, converted to sherpa-onnx (encoder/decoder/joiner, int8) — fast offline transcription across 25 European languages including English and French.",
+      "description": "NVIDIA NeMo Parakeet TDT v3 transducer (int8) \u2014 fast, accurate offline transcription for dictation, imports and sessions across 25 European languages including English and French, with automatic language detection and built-in punctuation.",
       "languages": [
         "en",
         "fr"
@@ -63,7 +96,7 @@
       "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
       "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
       "archive": "tar.bz2",
-      "recommended": false
+      "recommended": true
     },
     {
       "id": "kokoro-en-v0_19",
@@ -101,14 +134,14 @@
       "id": "zipvoice-distill-int8",
       "task": "clone-tts",
       "name": "ZipVoice Distill int8 (zh/en)",
-      "description": "Zero-shot voice cloning from a short reference recording, fully on-device. English and Chinese only \u2014 French clones fall back to ElevenLabs. Ships with the Vocos 24 kHz vocoder.",
+      "description": "Zero-shot voice cloning from a short reference recording, fully on-device. English and Chinese only \u2014 French clones fall back to ElevenLabs. Ships with the Vocos 24 kHz vocoder. Non-commercial weights (trained on the CC-BY-NC Emilia dataset).",
       "languages": [
         "en",
         "zh"
       ],
       "sizeBytes": 163320194,
       "quantization": "int8",
-      "license": "Apache-2.0",
+      "license": "Apache-2.0 (code) / CC-BY-NC-4.0 (weights, Emilia data)",
       "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
       "sha256": "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803",
       "archive": "tar.bz2",
@@ -141,7 +174,7 @@
       "id": "pyannote-segmentation-3-0",
       "task": "diarization",
       "name": "Pyannote segmentation 3.0",
-      "description": "Speaker segmentation for offline diarization (who spoke when) — pairs with the speaker embedding model for clustering. Language-agnostic. Includes fp32 and int8 weights (int8 preferred at load).",
+      "description": "Speaker segmentation for offline diarization (who spoke when) \u2014 pairs with the speaker embedding model for clustering. Language-agnostic. Includes fp32 and int8 weights (int8 preferred at load).",
       "languages": [],
       "sizeBytes": 6958444,
       "quantization": "int8",
@@ -155,7 +188,7 @@
       "id": "ct-transformer-zh-en",
       "task": "punctuation",
       "name": "CT-Transformer punctuation (zh/en)",
-      "description": "Adds punctuation and casing to raw ASR output for dictation and live sessions. English and Chinese \u2014 no local French punctuation model exists yet (spec \u00a75 gap).",
+      "description": "Adds punctuation and casing to raw ASR output when the engine leaves none (punctuating engines like Parakeet and Nemotron skip it). English and Chinese \u2014 no local French punctuation model exists yet (spec \u00a75 gap). fp32 weights; the int8 build gives the same output at a quarter of the size.",
       "languages": [
         "en",
         "zh"
@@ -166,13 +199,30 @@
       "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2",
       "sha256": "50f73f8cccffc2303999fda28b785ffcffbd7ea442c47385c30b9d045ee6afc3",
       "archive": "tar.bz2",
+      "recommended": false
+    },
+    {
+      "id": "ct-transformer-zh-en-int8",
+      "task": "punctuation",
+      "name": "CT-Transformer punctuation int8 (zh/en)",
+      "description": "Int8 build of the CT-Transformer punctuator \u2014 same output at a quarter of the size. Adds punctuation and casing to raw ASR output when the engine leaves none (punctuating engines like Parakeet and Nemotron skip it). English and Chinese only.",
+      "languages": [
+        "en",
+        "zh"
+      ],
+      "sizeBytes": 64717756,
+      "quantization": "int8",
+      "license": "MIT",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2",
+      "sha256": "c0d5aa5f8eeb686032345e180bedf39319dc2e0556781c6264bcadba8328a6e1",
+      "archive": "tar.bz2",
       "recommended": true
     },
     {
       "id": "kws-zipformer-gigaspeech",
       "task": "kws",
       "name": "Zipformer KWS (GigaSpeech, EN)",
-      "description": "Streaming keyword spotter (3.3M params) trained on GigaSpeech — powers the playground keyword-spotting bench. Keywords are supplied as BPE tokens; ships bundled defaults (HELLO WORLD, HEY SIRI, …).",
+      "description": "Streaming keyword spotter (3.3M params) trained on GigaSpeech \u2014 powers the playground keyword-spotting bench. Keywords are supplied as BPE tokens; ships bundled defaults (HELLO WORLD, HEY SIRI, \u2026).",
       "languages": [
         "en"
       ],
@@ -188,7 +238,7 @@
       "id": "spleeter-2stems-fp16",
       "task": "separation",
       "name": "Spleeter 2-stems (fp16)",
-      "description": "Offline source separation splitting a clip into vocals + accompaniment (Deezer Spleeter, fp16) — the playground source-separation bench. Language-agnostic; file input only.",
+      "description": "Offline source separation splitting a clip into vocals + accompaniment (Deezer Spleeter, fp16) \u2014 the playground source-separation bench. Language-agnostic; file input only.",
       "languages": [],
       "sizeBytes": 35271738,
       "quantization": null,
@@ -202,7 +252,7 @@
       "id": "whisper-tiny-langid",
       "task": "lang-id",
       "name": "Whisper tiny (language ID)",
-      "description": "Multilingual Whisper tiny encoder/decoder for spoken-language identification (99 languages) — the playground language-ID bench. Returns a single top language.",
+      "description": "Multilingual Whisper tiny encoder/decoder for spoken-language identification (99 languages) \u2014 the playground language-ID bench. Returns a single top language.",
       "languages": [],
       "sizeBytes": 116204861,
       "quantization": "int8",
@@ -211,6 +261,20 @@
       "sha256": "c46116994e539aa165266d96b325252728429c12535eb9d8b6a2b10f129e66b1",
       "archive": "tar.bz2",
       "recommended": true
+    },
+    {
+      "id": "whisper-base-langid",
+      "task": "lang-id",
+      "name": "Whisper base (language ID)",
+      "description": "Multilingual Whisper base for spoken-language identification (99 languages) \u2014 more reliable than tiny on short or noisy clips, at under twice the size. Returns a single top language.",
+      "languages": [],
+      "sizeBytes": 207557382,
+      "quantization": "int8",
+      "license": "MIT",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2",
+      "sha256": "911b2083efd7c0dca2ac3b358b75222660dc09fb716d64fbfc417ba6c99ff3de",
+      "archive": "tar.bz2",
+      "recommended": false
     }
   ]
 }

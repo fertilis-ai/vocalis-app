@@ -15,13 +15,19 @@ fn wav_samples(path: &std::path::Path) -> (Vec<f32>, i32) {
     (wave.samples().to_vec(), wave.sample_rate())
 }
 
+/// Committed 16 kHz English clip ("The quick brown fox jumps over the lazy
+/// dog") — model-agnostic, unlike release test_wavs, which vary per model.
+fn english_clip() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/wavs/speech-en-16k.wav")
+}
+
 #[test]
 #[ignore]
 fn streaming_asr_transcribes_test_wav() {
     let asr_dir = registry::first_installed("asr-streaming")
         .unwrap()
         .expect("no asr-streaming model installed");
-    let test_wav = asr_dir.join("test_wavs/0.wav");
+    let test_wav = english_clip();
     let (samples, rate) = wav_samples(&test_wav);
     assert_eq!(rate, 16_000, "test wav must be 16kHz");
 
@@ -46,10 +52,9 @@ fn streaming_asr_transcribes_test_wav() {
     let text = last_partial.to_lowercase();
     println!("transcript: {text}");
     assert!(!text.is_empty(), "expected a transcript");
-    // 0.wav in the zipformer release says "after early nightfall the yellow
-    // lamps would light up here and there the squalid quarter of the brothels"
+    // The fixture clip says "the quick brown fox jumps over the lazy dog".
     assert!(
-        text.contains("nightfall") || text.contains("yellow"),
+        text.contains("fox") || text.contains("dog"),
         "unexpected transcript: {text}"
     );
 }
@@ -63,10 +68,7 @@ fn offline_whisper_transcribes_test_wav() {
     let batch_dir = registry::first_installed("asr-batch")
         .unwrap()
         .expect("no asr-batch model installed");
-    let asr_dir = registry::first_installed("asr-streaming")
-        .unwrap()
-        .expect("no asr-streaming model installed");
-    let (samples, rate) = wav_samples(&asr_dir.join("test_wavs/0.wav"));
+    let (samples, rate) = wav_samples(&english_clip());
     assert_eq!(rate, 16_000);
 
     // 2 threads matches the interactive pipelines' ASR_THREADS (chat_capture,
@@ -84,7 +86,7 @@ fn offline_whisper_transcribes_test_wav() {
     let text = result.text.to_lowercase();
     println!("whisper transcript: {text}");
     assert!(
-        text.contains("nightfall") || text.contains("yellow"),
+        text.contains("fox") || text.contains("dog"),
         "unexpected transcript: {text}"
     );
     // The stock k2-fsa whisper export has no cross-attention outputs, so
@@ -103,14 +105,14 @@ fn streaming_zipformer_transcribes_whole_file() {
     let asr_dir = registry::first_installed("asr-streaming")
         .unwrap()
         .expect("no asr-streaming model installed");
-    let (samples, _) = wav_samples(&asr_dir.join("test_wavs/0.wav"));
+    let (samples, _) = wav_samples(&english_clip());
 
     let session = StreamingAsrSession::new(&asr_dir, 4).unwrap();
     let result = session.transcribe_file(&samples).unwrap();
     let text = result.text.to_lowercase();
     println!("zipformer file transcript: {text}");
     assert!(
-        text.contains("nightfall") || text.contains("yellow"),
+        text.contains("fox") || text.contains("dog"),
         "unexpected transcript: {text}"
     );
     assert!(!result.words.is_empty(), "expected word timestamps");
@@ -119,15 +121,12 @@ fn streaming_zipformer_transcribes_whole_file() {
 #[test]
 #[ignore]
 fn vad_detects_speech_in_test_wav() {
-    let asr_dir = registry::first_installed("asr-streaming")
-        .unwrap()
-        .expect("no asr-streaming model installed");
     let vad_dir = registry::first_installed("vad")
         .unwrap()
         .expect("no vad model installed");
     let vad_path = registry::find_file(&vad_dir, "silero", ".onnx").unwrap();
 
-    let (samples, _) = wav_samples(&asr_dir.join("test_wavs/0.wav"));
+    let (samples, _) = wav_samples(&english_clip());
     let mut vad = SpeechDetector::new(&vad_path).unwrap();
 
     let mut saw_speech = false;
@@ -205,10 +204,7 @@ fn speaker_embedding_verifies_same_voice_on_test_wav() {
     let embed_dir = registry::first_installed("speaker-embedding")
         .unwrap()
         .expect("no speaker-embedding model installed");
-    let asr_dir = registry::first_installed("asr-streaming")
-        .unwrap()
-        .expect("no asr-streaming model installed");
-    let (samples, _) = wav_samples(&asr_dir.join("test_wavs/0.wav"));
+    let (samples, _) = wav_samples(&english_clip());
 
     let embedder = SpeakerEmbedder::new(&embed_dir, 2).unwrap();
     let mid = samples.len() / 2;
@@ -233,10 +229,7 @@ fn diarization_segments_test_wav_with_installed_models() {
     let embed_dir = registry::first_installed("speaker-embedding")
         .unwrap()
         .expect("no speaker-embedding model installed");
-    let asr_dir = registry::first_installed("asr-streaming")
-        .unwrap()
-        .expect("no asr-streaming model installed");
-    let (samples, _) = wav_samples(&asr_dir.join("test_wavs/0.wav"));
+    let (samples, _) = wav_samples(&english_clip());
     let duration = samples.len() as f32 / 16_000.0;
 
     let diarizer = Diarizer::new(&segmentation_dir, &embed_dir, 4).unwrap();
@@ -278,16 +271,13 @@ fn langid_identifies_english() {
     let model_dir = registry::first_installed("lang-id")
         .unwrap()
         .expect("no lang-id model installed");
-    let asr_dir = registry::first_installed("asr-streaming")
-        .unwrap()
-        .expect("no asr-streaming model installed");
-    let (samples, rate) = wav_samples(&asr_dir.join("test_wavs/0.wav"));
+    let (samples, rate) = wav_samples(&english_clip());
     assert_eq!(rate, 16_000);
 
     let engine = LangIdentifier::new(&model_dir, 4).unwrap();
     let lang = engine.identify(&samples).unwrap();
     println!("detected language: {lang}");
-    assert_eq!(lang, "en", "0.wav is English");
+    assert_eq!(lang, "en", "the fixture clip is English");
 }
 
 #[test]
@@ -298,10 +288,7 @@ fn source_separation_yields_two_stems() {
     let model_dir = registry::first_installed("separation")
         .unwrap()
         .expect("no separation model installed");
-    let asr_dir = registry::first_installed("asr-streaming")
-        .unwrap()
-        .expect("no asr-streaming model installed");
-    let (samples, rate) = wav_samples(&asr_dir.join("test_wavs/0.wav"));
+    let (samples, rate) = wav_samples(&english_clip());
 
     let separator = SourceSeparator::new(&model_dir, 4).unwrap();
     let stems = separator.separate(&samples, rate as u32).unwrap();

@@ -214,8 +214,8 @@ Rules: raw audio never crosses the IPC boundary during realtime capture (it stay
 
 | Task | v1 default | Alternatives |
 |---|---|---|
-| Streaming ASR (Playground demo only) | local zipformer-en (FR: Deepgram until local FR streaming lands) | Deepgram |
-| Batch ASR (dictation/live/chat, imports) | local whisper-small-int8 (measured RTF ~0.12 at 2 threads — sub-second per-utterance decode) | Groq whisper-large-v3, OpenAI, ElevenLabs Scribe |
+| Streaming ASR (Playground demo only) | local streaming model — recommended `nemotron-3.5-streaming-560ms-int8` (40 locales incl. EN/FR, punctuated) | Deepgram |
+| Batch ASR (dictation/live/chat, imports) | local batch model — recommended `parakeet-tdt-0.6b-v3-int8` (measured RTF ~0.08 at 2 threads, Windows x64; whisper-small-int8 measured ~0.12) | Groq whisper-large-v3, OpenAI, ElevenLabs Scribe |
 | TTS (chat/read-aloud) | local kokoro | ElevenLabs, OpenAI |
 | Cloned-voice TTS | local zipvoice | ElevenLabs clone |
 | Diarization | local (pyannote seg + embeddings) | Deepgram (on API imports) |
@@ -273,19 +273,19 @@ Conventions: **JSON for all machine state** (one schema per file type, all Zod-v
 
 | Task | Model (catalog id) | Notes |
 |---|---|---|
-| Streaming ASR (EN) | `zipformer-streaming-en` (sherpa-onnx streaming Zipformer transducer, int8) | Streaming Recognition Playground demo only |
-| Batch ASR (multi, EN/FR) | `whisper-small-int8`; optional `whisper-medium-int8` | dictation/live/chat/imports default; keep-warm; FR local batch quality |
-| Batch ASR (fast, multi) | `parakeet-tdt-0.6b-v3-int8` (NeMo transducer, 25 languages incl. EN/FR) or `moonshine-base` | fast imports |
-| VAD | `silero-vad-v5` | resident; all pipelines |
+| Streaming ASR (EN/FR) | **`nemotron-3.5-streaming-560ms-int8`** (NeMo cache-aware streaming transducer, auto language ID, punctuated); `zipformer-en-2023-06-26` (light EN fallback); `zipformer-fr-kroko-2025-08-06` (light FR) | Streaming Recognition Playground demo only |
+| Batch ASR (EN/FR) | **`parakeet-tdt-0.6b-v3-int8`** (NeMo TDT transducer, 25 European languages, auto language ID, punctuated; needs sherpa-onnx ≥ 1.13.5) | dictation/live/chat/imports default; keep-warm |
+| Batch ASR (99 languages) | `whisper-small-int8` | languages outside Parakeet's 25; per-language selection |
+| VAD | `silero-vad-v5` (id kept; the file is k2-fsa's Silero **v4** export) | resident; all pipelines |
 | Speaker embedding | 3D-Speaker `eres2netv2` (or WeSpeaker CAM++ VoxCeleb) | ID/verify/diarization; EN/FR robust (trained multilingual/VoxCeleb) |
 | Diarization segmentation | `pyannote-segmentation-3.0` (ONNX) | offline diarization pipeline |
-| Punctuation | `ct-transformer-punct-zh-en` | **EN only — no local FR punctuation model exists**; FR relies on Whisper's inline punctuation (batch) or LLM polish (dictation). Documented gap. |
+| Punctuation | **`ct-transformer-zh-en-int8`** (same output as fp32 `ct-transformer-zh-en`, ¼ the size) | Runs only when the ASR engine left no punctuation (`Punctuator::punctuate_if_needed`). **EN only — no local FR punctuation model exists**; FR relies on the punctuating ASR models (Parakeet, Nemotron, Kroko, Whisper) or LLM polish (dictation). Documented gap. |
 | KWS | `kws-zipformer-gigaspeech` (EN) | playground |
 | Source separation | `spleeter-2stems` / UVR model (sherpa-onnx supported) | vocals/accompaniment |
-| Spoken language ID | `whisper-tiny-langid` (multilingual Whisper used for LID) | auto-routing hook |
+| Spoken language ID | `whisper-tiny-langid`; `whisper-base-langid` (more reliable, ~2× size) | auto-routing hook |
 | TTS EN | `kokoro-en` (multi-voice), `piper-en_US-lessac` | fast local voices |
 | TTS FR | `kokoro-v1-fr` voice, `piper-fr_FR-siwis` | French stock voices |
-| Zero-shot clone TTS | `zipvoice` + `zipvoice-distill` | batch synthesis; sentence-chunked for chat |
+| Zero-shot clone TTS | `zipvoice` + `zipvoice-distill` | batch synthesis; sentence-chunked for chat. **Weights are CC-BY-NC** (Emilia training data) — non-commercial only |
 
 Exact URLs/sha256 pinned when the catalog file is authored (k2-fsa GitHub releases / HF mirrors); each entry download-tested on Apple Silicon during M0.
 
@@ -322,7 +322,7 @@ From the source exploration of `~/dev/fertilis/sapio-app` (`apps/web/` unless no
 3. **Online diarization** is genuinely hard (incremental clustering instability). Mitigation: live labels are provisional (UI marks them subtly); a refinement pass on session stop re-clusters and cleans labels. Fallback if live quality disappoints: live shows VAD-segmented turns with speaker-ID-only naming (enrolled people), full diarization as the stop-time pass.
 4. **Echo without AEC** — speaker output re-triggering VAD. V1: pause capture during playback + headphone guidance (no barge-in — capture just resumes once playback drains); if insufficient, add an AEC stage (e.g. speex/webrtc-audio-processing crate) in the capture path.
 5. **macOS text injection** — accessibility permission friction + ⌘V quirks in some apps (terminals, secure fields). Degrade to clipboard+notification; keep the previous clipboard restore robust (restore on a short delay after paste event).
-6. **French local coverage** — no FR local punctuation (batch ASR itself, now the default for live/dictation/chat, is multilingual `whisper-small-int8` and covers FR directly). Honest v1: FR punctuation relies on Whisper's inline punctuation or LLM polish (dictation); no FR streaming Zipformer either, but that only affects the Streaming Recognition Playground demo, not production.
+6. **French local coverage** — no FR local punctuation model, but the recommended ASR models punctuate French themselves: batch `parakeet-tdt-0.6b-v3-int8` (the default for live/dictation/chat) and streaming `nemotron-3.5-streaming-560ms-int8` / `zipformer-fr-kroko-2025-08-06`, so the zh/en punctuator is skipped on their output. Remaining FR gaps: local French TTS beyond Piper SIWIS (Kokoro v1.0 `ff_siwis` needs engine work) and French voice cloning (none in sherpa-onnx).
 7. **Concurrent model memory** — live session runs VAD+ASR+embedder simultaneously; with ZipVoice warm this can exceed comfortable RAM on 8 GB machines. EngineManager LRU + pipeline inspector memory view exist for this; catalog favors int8 quantizations.
 8. **Sapio-inherited build gotchas** (inspiration.md §8) — Node-builtin webview stubs, thenable-Proxy Vitest hangs, timer cleanup in dispose, MediaRecorder `onstop` awaiting (still relevant for enrollment recording in the webview), ElevenLabs/OpenAI API quirks (omit empty params; raw-bytes TTS responses).
 

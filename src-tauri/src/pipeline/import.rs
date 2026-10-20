@@ -157,13 +157,7 @@ fn run_import(models: ImportModels, channel: Channel<PipelineEvent>, stop: Arc<A
             Ok(None) => return send(PipelineEvent::Cancelled),
             Err(message) => return send(PipelineEvent::Error { message }),
         };
-        // Whisper usually punctuates; only run the punctuator when it didn't
-        // (spec §2.2B: "+ punctuation if the engine leaves none").
-        let text = if text.is_empty() || has_sentence_punctuation(&text) {
-            text
-        } else {
-            punctuator.punctuate(&text)
-        };
+        let text = punctuator.punctuate_if_needed(&text);
 
         done_secs += span_secs;
         if text.trim().is_empty() {
@@ -235,13 +229,6 @@ fn settle(
 
 // ── Pure algorithmic core (unit-tested) ─────────────────────────────────────
 
-/// Whether text already carries sentence punctuation, so the punctuator can be
-/// skipped. Covers both ASCII and CJK/French terminal marks.
-fn has_sentence_punctuation(text: &str) -> bool {
-    text.chars()
-        .any(|c| matches!(c, '.' | ',' | '!' | '?' | ';' | ':' | '。' | '，' | '！' | '？' | '、'))
-}
-
 /// Fraction in [0,1], guarding a zero total (all-silence clips).
 fn progress_fraction(done: f64, total: f64) -> f32 {
     if total <= 0.0 {
@@ -253,14 +240,6 @@ fn progress_fraction(done: f64, total: f64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn punctuation_detection() {
-        assert!(has_sentence_punctuation("Hello, world."));
-        assert!(has_sentence_punctuation("really?"));
-        assert!(!has_sentence_punctuation("hello world"));
-        assert!(!has_sentence_punctuation("no marks here"));
-    }
 
     #[test]
     fn progress_fraction_guards_zero_total() {
